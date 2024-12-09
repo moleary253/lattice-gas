@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 }
 
 fn coexistence() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let (width, height) = (10, 4);
+    let (width, height) = (20, 4);
 
     let beta = 1.0;
     let bond_energy = -2.95;
@@ -179,95 +179,5 @@ fn coexistence() -> Result<(), Box<dyn std::error::Error + 'static>> {
 
     archive_builder.finish()?;
 
-    Ok(())
-}
-
-fn ising_test() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let (width, height) = (50, 50);
-
-    let betas = (0..10).map(|x| x as f64 / 50. + 0.36);
-    let bond_energy = -4.0;
-    let driving_chemical_potential = 0.0;
-    let inert_fugacity = 0.;
-    let bonding_mu = 2. * bond_energy;
-    let inert_to_bonding_rate = 0.0;
-
-    let until_time = 10_000.;
-    let until_step = 1_000_000;
-    let averaging_time = 1000.;
-
-    for beta in betas {
-        let dir = format!("data/test/beta={:.2}", beta);
-        fs::create_dir_all(&dir)?;
-
-        let chain = HomogenousChain::new(
-            beta,
-            bond_energy,
-            driving_chemical_potential,
-            inert_fugacity,
-            (bonding_mu * beta).exp(),
-            inert_to_bonding_rate,
-        );
-        fs::write(
-            format!("{}/chain.json", &dir),
-            serde_json::to_string(&chain)?,
-        )?;
-
-        let mut system = System::full(width, height, Box::new(chain), SiteState::Bonding);
-        fs::write(
-            format!("{}/initial_conditions.json", &dir),
-            serde_json::to_string(&system.state)?,
-        )?;
-
-        let mut reactions: Vec<(f64, Reaction<SiteState>)> = Vec::new();
-
-        let mut running_sum = 0.;
-        let mut time_measured = 0.;
-
-        println!("\nRun with beta = {}", beta);
-        let mut i = 0;
-        loop {
-            i += 1;
-            if system.time > until_time || i == until_step {
-                break;
-            }
-
-            let (dt, reaction) = system.next_reaction();
-            reactions.push((dt, reaction));
-
-            match update_running_average(
-                &system,
-                dt,
-                averaging_time,
-                &mut running_sum,
-                &mut time_measured,
-                &|system: &System| {
-                    *(system
-                        .particle_number()
-                        .get(&SiteState::Bonding)
-                        .unwrap_or(&0)) as f64
-                        / system.state.len() as f64
-                },
-            ) {
-                None => {}
-                Some(average) => {
-                    println!("Average at {:.0} sec: {}", system.time.round(), average);
-                }
-            }
-
-            system.update(dt, reaction);
-        }
-
-        fs::write(
-            format!("{}/reactions.json", &dir),
-            serde_json::to_string(&reactions)?,
-        )?;
-
-        println!(
-            "Final average at {:.2} sec: {}",
-            system.time,
-            running_sum / time_measured
-        );
-    }
     Ok(())
 }

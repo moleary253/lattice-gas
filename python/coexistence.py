@@ -38,8 +38,6 @@ def analyze(tar_archive=TARFILE, directory=DIRECTORY):
         with open(os.path.join(simulation, OUTCOME_FILE)) as f:
             data = f.read()
 
-        print(chain_json)
-
         if chain_json[independent_variable] not in counts:
             counts[chain_json[independent_variable]] = 0
             n_gas[chain_json[independent_variable]] = 0

@@ -47,9 +47,12 @@ where
     }
 }
 
-pub trait MarkovChain {
-    fn rate(&self, system: &System, reaction: Reaction<SiteState>) -> f64;
-    fn allowed_reactions(&self, system: &System) -> Vec<Reaction<SiteState>>;
+pub trait MarkovChain<T>
+where
+    T: Clone,
+{
+    fn rate(&self, system: &System, reaction: Reaction<T>) -> f64;
+    fn allowed_reactions(&self, system: &System) -> Vec<Reaction<T>>;
 }
 
 /*
@@ -81,7 +84,7 @@ impl IsingChain {
     }
 }
 
-impl MarkovChain for IsingChain {
+impl MarkovChain<SiteState> for IsingChain {
     fn rate(&self, system: &System, reaction: Reaction<SiteState>) -> f64 {
         match reaction {
             Reaction::PointChange { from, to, position } => match (from, to) {
@@ -189,7 +192,7 @@ impl HomogenousChain {
     }
 }
 
-impl MarkovChain for HomogenousChain {
+impl MarkovChain<SiteState> for HomogenousChain {
     fn rate(&self, system: &System, reaction: Reaction<SiteState>) -> f64 {
         match reaction {
             Reaction::PointChange { from, to, position } => match (from, to) {
@@ -233,18 +236,159 @@ impl MarkovChain for HomogenousChain {
     }
 }
 
+/// Describes a Markov chain which is meant to model T-Cells.
+///
+/// Assumptions:
+/// - Zeta-chain / Zap70 system can be modeled well by a Gaussian approximation to a WLC
+///   - Neglects excluded volume with cell wall anywhere on the WLC except at the end.
+/// - Lck recruitment is not important
+/// - Zap70 concentration is not time dependent
+/// - Zap70 + LAT reaction involves interactions between one LAT and one Zap70
+///
+/// Allowed Reactions:
+/// - Diffusion with rate constant 1
+/// - pLAT(B) to LAT(I) & reverse, catalyzed by Zap70, pushing towards pLAT with Delta mu
+///
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TCellChain {
+    pub beta: f64,
+    pub bond_energy: f64,
+    pub driving_chemical_potential: f64,
+    pub phosphorylation_rate_constant: f64,
+
+    pub zeta_chain_extension_stdev: f64,
+    pub reaction_box_size: f64,
+    pub t_cell_receptor_position: [usize; 2],
+}
+
+/*
+ * Constructors
+ */
+impl TCellChain {
+    pub fn new(
+        beta: f64,
+        bond_energy: f64,
+        driving_chemical_potential: f64,
+        phosphorylation_rate_constant: f64,
+        zeta_chain_extension_stdev: f64,
+        reaction_box_size: f64,
+        t_cell_receptor_position: [usize; 2],
+    ) -> Self {
+        TCellChain {
+            beta,
+            bond_energy,
+            driving_chemical_potential,
+            phosphorylation_rate_constant,
+            zeta_chain_extension_stdev,
+            reaction_box_size,
+            t_cell_receptor_position,
+        }
+    }
+}
+
+impl TCellChain {
+    pub fn site_energy(&self, system: &System, position: [usize; 2]) -> f64 {
+        let mut energy = 0.;
+        let [x, y] = position;
+        let (x, y) = (x as i32, y as i32);
+        for (dx, dy) in [(-1, 0), (1, 0), (0, 1), (0, -1)] {
+            let adjacent_state = system.state[[
+                (dx + x).rem_euclid(system.state.shape()[0] as i32) as usize,
+                (dy + y).rem_euclid(system.state.shape()[1] as i32) as usize,
+            ]];
+            if adjacent_state == SiteState::Bonding {
+                energy += self.bond_energy;
+            }
+        }
+        energy
+    }
+
+    pub fn zap70_probability(&self, position: [usize; 2]) -> f64 {
+        let [x, y] = position;
+        let (x, y) = (x as f64, y as f64);
+        let (dx, dy) = (
+            x - self.t_cell_receptor_position[0] as f64,
+            y - self.t_cell_receptor_position[1] as f64,
+        );
+        let distance_squared = (dx * dx + dy * dy);
+
+        (3. / 2. / std::f64::consts::PI / self.zeta_chain_extension_stdev.powi(2))
+            .powi(3)
+            .sqrt()
+            * (3. * distance_squared / 2. / self.zeta_chain_extension_stdev.powi(2)).exp()
+    }
+}
+
+impl MarkovChain<SiteState> for TCellChain {
+    fn rate(&self, system: &System, reaction: Reaction<SiteState>) -> f64 {
+        match reaction {
+            Reaction::PointChange { from, to, position } => match (from, to) {
+                (SiteState::Inert, SiteState::Bonding) => self.phosphorylation_rate_constant,
+
+                (SiteState::Bonding, SiteState::Inert) => {
+                    self.phosphorylation_rate_constant
+                        * self.zap70_probability(position)
+                        * (self.beta
+                            * (self.site_energy(system, position)
+                                + self.driving_chemical_potential))
+                            .exp()
+                }
+                _ => 0.,
+            },
+            Reaction::Diffusion { from, to } => {
+                if (from[0] as i64 - to[0] as i64).abs() + (from[1] as i64 - to[1] as i64).abs()
+                    == 1
+                {
+                    1.
+                } else {
+                    0.
+                }
+            }
+        }
+    }
+
+    fn allowed_reactions(&self, system: &System) -> Vec<Reaction<SiteState>> {
+        let mut reactions = Vec::new();
+        for (i, state) in system.state.iter().enumerate() {
+            let pos = system.pos_of_ith_site(i);
+            for (dx, dy) in [(0, 1), (1, 0)] {
+                reactions.push(Reaction::diffusion(
+                    pos,
+                    [
+                        (pos[0] + dx) % system.state.shape()[0],
+                        (pos[1] + dy) % system.state.shape()[1],
+                    ],
+                ));
+            }
+
+            if *state == SiteState::Empty {
+                continue;
+            }
+
+            for next_state in [SiteState::Inert, SiteState::Bonding] {
+                if *state == next_state {
+                    continue;
+                }
+                reactions.push(Reaction::point_change(*state, next_state, pos));
+            }
+        }
+
+        return reactions;
+    }
+}
+
 pub struct System {
     pub state: Array2<SiteState>,
     pub time: f64,
 
-    pub chain: Box<dyn MarkovChain>,
+    pub chain: Box<dyn MarkovChain<SiteState>>,
 }
 
 /*
  * Constructors
  */
 impl System {
-    pub fn empty(width: usize, height: usize, chain: Box<dyn MarkovChain>) -> Self {
+    pub fn empty(width: usize, height: usize, chain: Box<dyn MarkovChain<SiteState>>) -> Self {
         System {
             state: Array2::default((height, width)),
             time: 0.,
@@ -255,7 +399,7 @@ impl System {
     pub fn full(
         width: usize,
         height: usize,
-        chain: Box<dyn MarkovChain>,
+        chain: Box<dyn MarkovChain<SiteState>>,
         state: SiteState,
     ) -> Self {
         System {
@@ -265,7 +409,7 @@ impl System {
         }
     }
 
-    pub fn with_state(chain: Box<dyn MarkovChain>, state: Array2<SiteState>) -> Self {
+    pub fn with_state(chain: Box<dyn MarkovChain<SiteState>>, state: Array2<SiteState>) -> Self {
         System {
             state,
             time: 0.,
@@ -297,50 +441,24 @@ impl System {
  */
 impl System {
     pub fn next_reaction(&self) -> (f64, Reaction<SiteState>) {
-        let mut partial_sums_of_rates: Vec<f64> = Vec::with_capacity(self.state.len());
-        for (i, state) in self.state.iter().enumerate() {
-            let pos = self.pos_of_ith_site(i);
-
-            partial_sums_of_rates.push(*partial_sums_of_rates.last().unwrap_or(&0.));
-            partial_sums_of_rates[i] += self
-                .chain
-                .rate(&self, Reaction::new(*state, SiteState::Empty, pos));
-            partial_sums_of_rates[i] += self
-                .chain
-                .rate(&self, Reaction::new(*state, SiteState::Inert, pos));
-            partial_sums_of_rates[i] += self
-                .chain
-                .rate(&self, Reaction::new(*state, SiteState::Bonding, pos));
-        }
+        let reactions = self.chain.allowed_reactions(&self);
+        let partial_sums_of_rates: Vec<f64> = reactions
+            .iter()
+            .map(|rxn| self.chain.rate(&self, *rxn))
+            .scan(0., |sum, rate| {
+                *sum += rate;
+                Some(*sum)
+            })
+            .collect();
 
         let mut rng = rand::thread_rng();
         let tau = -(rng.gen::<f64>()).ln() / partial_sums_of_rates.last().unwrap();
         let chosen_partial_sum = rng.gen::<f64>() * partial_sums_of_rates.last().unwrap();
 
-        let chosen_i = (&partial_sums_of_rates).partition_point(|a| *a <= chosen_partial_sum);
-        let chosen_pos = self.pos_of_ith_site(chosen_i);
-        let chosen_state = self.state[chosen_pos];
+        let chosen_reaction =
+            reactions[(&partial_sums_of_rates).partition_point(|a| *a <= chosen_partial_sum)];
 
-        let next_state = {
-            let mut sum = *partial_sums_of_rates.get(chosen_i - 1).unwrap_or(&0.);
-            let states = [SiteState::Empty, SiteState::Inert, SiteState::Bonding];
-            let mut states_iter = states.iter();
-            loop {
-                let state = states_iter.next().unwrap();
-                sum += self.chain.rate(
-                    &self,
-                    Reaction::point_change(chosen_state, *state, chosen_pos),
-                );
-                if sum > chosen_partial_sum {
-                    break *state;
-                }
-            }
-        };
-
-        (
-            tau,
-            Reaction::point_change(self.state[chosen_pos], next_state, chosen_pos),
-        )
+        (tau, chosen_reaction)
     }
 
     pub fn update(&mut self, delta_t: f64, reaction: Reaction<SiteState>) {
