@@ -57,8 +57,11 @@ def interactive_image(initial_conditions, reactions):
     times = np.cumsum(np.array([reaction["dt"] for reaction in reactions]))
 
     time_ax = fig.add_axes([0.25, 0.05, 0.5, 0.03])
-    def apply_reaction(reaction): current_conditions[tuple(reaction["position"])] = reaction["to"]
-    def reverse_reaction(reaction): current_conditions[tuple(reaction["position"])] = reaction["from"]
+    def apply_reaction(reaction):
+        load.apply_reaction(current_conditions, reaction)
+
+    def reverse_reaction(reaction):
+        load.reverse_reaction(current_conditions, reaction)
 
     _slider = time_slider(
         time_ax,

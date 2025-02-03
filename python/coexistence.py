@@ -48,7 +48,7 @@ def analyze(tar_archive=TARFILE, directory=DIRECTORY):
 
     plot(counts, n_gas)
 
-    shutil.rmtree(DIRECTORY)
+    shutil.rmtree(directory)
 
 
 def plot(counts, n_gas):

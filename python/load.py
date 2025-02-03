@@ -8,6 +8,10 @@ CHAIN_FILE = "chain.json"
 INITIAL_CONDITIONS_FILE = "initial_conditions.json"
 REACTIONS_FILE = "reactions.json"
 
+TYPE = "reaction_type"
+POINT_CHANGE = "PointChange"
+DIFFUSION = "Diffusion"
+
 EMPTY = 0
 INERT = 1
 BONDING = 2
@@ -87,7 +91,7 @@ def reactions(directory):
 
     :param directory: The directory the simulation is located in.
     :returns a time series of the reactions that occurred during the simulation. This is an array of
-    dictionaries of the form
+    dictionaries of which can take the form
     {
         "dt": float dt,
         "from": int state,
@@ -100,10 +104,17 @@ def reactions(directory):
 
     reactions = [
         {
+            TYPE: POINT_CHANGE,
             "dt": dt,
-            "from": TRANSLATE[reaction["from"]],
-            "to": TRANSLATE[reaction["to"]],
-            "position": reaction["position"]
+            "from": TRANSLATE[reaction[POINT_CHANGE]["from"]],
+            "to": TRANSLATE[reaction[POINT_CHANGE]["to"]],
+            "position": reaction[POINT_CHANGE]["position"]
+        } if POINT_CHANGE in reaction
+        else {
+            TYPE: DIFFUSION,
+            "dt": dt,
+            "from": reaction[DIFFUSION]["from"],
+            "to": reaction[DIFFUSION]["to"],
         }
         for (dt, reaction) in reactions_json
     ]
@@ -151,6 +162,34 @@ def tar_member(archive_path, member_path):
     return archive.extractfile(member_path)
 
 
+
+def apply_reaction(state, reaction):
+    """Applies a reaction to the input state in place."""
+    if reaction[TYPE] == POINT_CHANGE:
+        state[tuple(reaction["position"])] = reaction["to"]
+    elif reaction[TYPE] == DIFFUSION:
+        (
+            state[tuple(reaction["from"])],
+            state[tuple(reaction["to"])],
+        ) = (
+            state[tuple(reaction["to"])],
+            state[tuple(reaction["from"])],
+        )
+
+def reverse_reaction(state, reaction):
+    """Reverses a reaction to the input state in place."""
+    if reaction[TYPE] == POINT_CHANGE:
+        state[tuple(reaction["position"])] = reaction["from"]
+    elif reaction[TYPE] == DIFFUSION:
+        (
+            state[tuple(reaction["from"])],
+            state[tuple(reaction["to"])],
+        ) = (
+            state[tuple(reaction["to"])],
+            state[tuple(reaction["from"])],
+        )
+
+
 def counts(initial_conditions, reactions):
     """Calculates the number of each species initially and after each reaction.
 
@@ -166,8 +205,11 @@ def counts(initial_conditions, reactions):
 
     reaction_deltas = np.zeros(counts.shape)
     for i, reaction in enumerate(reactions):
-        reaction_deltas[reaction["from"], i+1] = -1
-        reaction_deltas[reaction["to"], i+1] = 1
+        if reaction[TYPE] == DIFFUSION:
+            pass
+        elif reaction[TYPE] == POINT_CHANGE:
+            reaction_deltas[reaction["from"], i+1] = -1
+            reaction_deltas[reaction["to"], i+1] = 1
 
     cum_reaction_deltas = np.cumsum(reaction_deltas, axis=1)
     counts += cum_reaction_deltas

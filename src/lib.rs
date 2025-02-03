@@ -55,6 +55,21 @@ where
     fn allowed_reactions(&self, system: &System) -> Vec<Reaction<T>>;
 }
 
+/// A statistic which can be calculated on a sytem.
+///
+/// The goal is that this caches the value it calculated to make reacalculating
+/// the statistic easier.
+pub trait Statistic<T> {
+    /// Initialize the statistic on a system
+    fn initialize(&mut self, system: &System);
+
+    /// Update the cached statistic when a new reaction happens
+    fn update(&mut self, system_pre_reaction: &System, delta_t: f64, reaction: Reaction<SiteState>);
+
+    /// Retrieve the value of the statistic
+    fn value(&self) -> &T;
+}
+
 /*
  * Describes an Ising model.
  */
@@ -310,7 +325,7 @@ impl TCellChain {
             x - self.t_cell_receptor_position[0] as f64,
             y - self.t_cell_receptor_position[1] as f64,
         );
-        let distance_squared = (dx * dx + dy * dy);
+        let distance_squared = dx * dx + dy * dy;
 
         (3. / 2. / std::f64::consts::PI / self.zeta_chain_extension_stdev.powi(2))
             .powi(3)
@@ -337,21 +352,44 @@ impl MarkovChain<SiteState> for TCellChain {
             },
             Reaction::Diffusion { from, to } => {
                 if (from[0] as i64 - to[0] as i64).abs() + (from[1] as i64 - to[1] as i64).abs()
-                    == 1
+                    != 1
                 {
-                    1.
-                } else {
-                    0.
+                    return 0.;
                 }
+
+                if system.state[from] == system.state[to] {
+                    return 0.;
+                }
+
+                if system.state[to] == SiteState::Bonding {
+                    return (self.beta
+                        * (self.site_energy(system, to) - self.site_energy(system, from)))
+                    .exp();
+                }
+
+                if system.state[from] == SiteState::Bonding {
+                    return (self.beta
+                        * (self.site_energy(system, from) - self.site_energy(system, to)))
+                    .exp();
+                }
+
+                1.
             }
         }
     }
 
     fn allowed_reactions(&self, system: &System) -> Vec<Reaction<SiteState>> {
-        let mut reactions = Vec::new();
+        let mut reactions = Vec::with_capacity(system.state.len() * 3);
         for (i, state) in system.state.iter().enumerate() {
             let pos = system.pos_of_ith_site(i);
             for (dx, dy) in [(0, 1), (1, 0)] {
+                let adjacent_pos = [
+                    (pos[0] + dx) % system.state.shape()[0],
+                    (pos[1] + dy) % system.state.shape()[1],
+                ];
+                if system.state[pos] == system.state[adjacent_pos] {
+                    continue;
+                }
                 reactions.push(Reaction::diffusion(
                     pos,
                     [
@@ -374,6 +412,50 @@ impl MarkovChain<SiteState> for TCellChain {
         }
 
         return reactions;
+    }
+}
+
+/// Keeps track of the number of each type of particle in the system.
+pub struct ParticleNumberStatistic {
+    counts: HashMap<SiteState, usize>,
+}
+
+impl ParticleNumberStatistic {
+    pub fn new() -> ParticleNumberStatistic {
+        ParticleNumberStatistic {
+            counts: HashMap::new(),
+        }
+    }
+}
+
+impl Statistic<HashMap<SiteState, usize>> for ParticleNumberStatistic {
+    fn initialize(&mut self, system: &System) {
+        self.counts = HashMap::new();
+        for site in system.state.iter() {
+            self.counts
+                .entry(*site)
+                .and_modify(|n| *n += 1)
+                .or_insert(1);
+        }
+    }
+
+    fn update(&mut self, _system: &System, _delta_t: f64, reaction: Reaction<SiteState>) {
+        match reaction {
+            Reaction::PointChange {
+                from,
+                to,
+                position: _,
+            } => {
+                *self.counts.get_mut(&from).unwrap() -= 1;
+                self.counts
+                    .insert(to, *self.counts.get(&to).unwrap_or(&0) + 1);
+            }
+            _ => {}
+        }
+    }
+
+    fn value(&self) -> &HashMap<SiteState, usize> {
+        &self.counts
     }
 }
 
@@ -404,6 +486,34 @@ impl System {
     ) -> Self {
         System {
             state: Array2::from_elem((height, width), state),
+            time: 0.,
+            chain,
+        }
+    }
+
+    pub fn random(
+        width: usize,
+        height: usize,
+        chain: Box<dyn MarkovChain<SiteState>>,
+        odds: [(SiteState, f64); 3],
+    ) -> Self {
+        let mut state = Array2::default((height, width));
+
+        let mut rng = rand::thread_rng();
+        let sum_of_weights = odds.iter().fold(0., |sum, (_, w)| sum + w);
+        for site in state.iter_mut() {
+            let rand_number = rng.gen::<f64>() * sum_of_weights;
+            let mut sum = 0.;
+            for (state, weight) in odds {
+                sum += weight;
+                if sum >= rand_number {
+                    *site = state;
+                    break;
+                }
+            }
+        }
+        System {
+            state,
             time: 0.,
             chain,
         }
@@ -442,14 +552,13 @@ impl System {
 impl System {
     pub fn next_reaction(&self) -> (f64, Reaction<SiteState>) {
         let reactions = self.chain.allowed_reactions(&self);
-        let partial_sums_of_rates: Vec<f64> = reactions
-            .iter()
-            .map(|rxn| self.chain.rate(&self, *rxn))
-            .scan(0., |sum, rate| {
-                *sum += rate;
-                Some(*sum)
-            })
-            .collect();
+        let mut partial_sums_of_rates: Vec<f64> = Vec::with_capacity(reactions.len());
+        let mut sum = 0.;
+        for reaction in reactions.iter() {
+            sum += self.chain.rate(&self, *reaction);
+            partial_sums_of_rates.push(sum);
+        }
+        let partial_sums_of_rates = partial_sums_of_rates;
 
         let mut rng = rand::thread_rng();
         let tau = -(rng.gen::<f64>()).ln() / partial_sums_of_rates.last().unwrap();
@@ -478,19 +587,6 @@ impl System {
     pub fn simulate_one_step_inplace(&mut self) {
         let (delta_t, reaction) = self.next_reaction();
         self.update(delta_t, reaction);
-    }
-}
-
-/*
- * System-wide statistics
- */
-impl System {
-    pub fn particle_number(&self) -> HashMap<SiteState, usize> {
-        let mut counts = HashMap::new();
-        for site in self.state.iter() {
-            counts.entry(*site).and_modify(|n| *n += 1).or_insert(1);
-        }
-        counts
     }
 }
 

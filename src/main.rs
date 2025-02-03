@@ -6,32 +6,217 @@ use std::fs;
 use tqdm::tqdm;
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    coexistence()
+    propensity()
+}
+
+fn profile() -> Result<(), Box<dyn std::error::Error + 'static>> {
+    let (width, height) = (19, 19);
+
+    let beta = 1.0;
+    let bond_energy = -2.95;
+    let driving_chemical_potential = 1.2;
+    let phosphorylation_rate_constant = 0.1;
+    let zeta_chain_extension_stdev = 3.;
+    let reaction_box_size = 0.;
+    let t_cell_receptor_position = [9, 9];
+
+    let outfile = fs::File::create("data/profile.tar.gz")?;
+    let zipper = GzEncoder::new(outfile, Compression::default());
+    let mut archive_builder = tar::Builder::new(zipper);
+
+    let num_trials = 10;
+    let threshold = 0.08;
+    let category = "profile";
+    let odds = [
+        (SiteState::Empty, 10.),
+        (SiteState::Inert, 2.),
+        (SiteState::Bonding, 0.0),
+    ];
+
+    for i in tqdm(0..num_trials) {
+        let sim_dir = format!("{}/trial_{}", category, i + 1);
+
+        let chain = TCellChain::new(
+            beta,
+            bond_energy,
+            driving_chemical_potential,
+            phosphorylation_rate_constant,
+            zeta_chain_extension_stdev,
+            reaction_box_size,
+            t_cell_receptor_position,
+        );
+        serialize::serialize_object(
+            format!("{}/chain.json", &sim_dir),
+            &chain,
+            &mut archive_builder,
+        )?;
+
+        let mut system = System::random(width, height, Box::new(chain.clone()), odds);
+        serialize::serialize_object(
+            format!("{}/initial_conditions.json", &sim_dir),
+            &system.state,
+            &mut archive_builder,
+        )?;
+
+        let mut reactions: Vec<(f64, Reaction<SiteState>)> = Vec::new();
+        loop {
+            let concentration = *(system
+                .particle_number()
+                .get(&SiteState::Bonding)
+                .unwrap_or(&0)) as f64
+                / system.state.len() as f64;
+            if concentration >= threshold {
+                serialize::serialize_object(
+                    format!("{}/outcome.txt", &sim_dir),
+                    &format!("{}", system.time),
+                    &mut archive_builder,
+                )?;
+                break;
+            }
+
+            let (dt, reaction) = system.next_reaction();
+            reactions.push((dt, reaction));
+
+            system.update(dt, reaction);
+        }
+        serialize::serialize_object(
+            format!("{}/reactions.json", &sim_dir),
+            &reactions,
+            &mut archive_builder,
+        )?;
+    }
+
+    archive_builder.finish()?;
+
+    Ok(())
+}
+
+fn propensity() -> Result<(), Box<dyn std::error::Error + 'static>> {
+    let (width, height) = (19, 19);
+
+    let beta = 1.0;
+    let bond_energy = -2.95;
+    let num_chemical_potentials = 5;
+    let (min_chemical_potential, max_chemical_potential) = (0., 1.2);
+    let driving_chemical_potentials = (0..num_chemical_potentials).map(|i| {
+        i as f64 / (num_chemical_potentials - 1) as f64
+            * (-min_chemical_potential + max_chemical_potential)
+            + min_chemical_potential
+    });
+    let phosphorylation_rate_constant = 0.1;
+    let zeta_chain_extension_stdev = 3.;
+    let reaction_box_size = 0.;
+    let t_cell_receptor_position = [9, 9];
+
+    let outfile = fs::File::create("data/propensity.tar.gz")?;
+    let zipper = GzEncoder::new(outfile, Compression::default());
+    let mut archive_builder = tar::Builder::new(zipper);
+
+    let num_trials = 100;
+    let threshold = 0.08;
+    let propensity_category = "propensity";
+    let odds = [
+        (SiteState::Empty, 10.),
+        (SiteState::Inert, 2.),
+        (SiteState::Bonding, 0.0),
+    ];
+
+    let mut particle_number = ParticleNumberStatistic::new();
+
+    for driving_chemical_potential in tqdm(driving_chemical_potentials) {
+        for i in tqdm(0..num_trials) {
+            let sim_dir = format!(
+                "{}/delta_mu={:.2}_trial_{}",
+                propensity_category,
+                driving_chemical_potential,
+                i + 1
+            );
+
+            let chain = TCellChain::new(
+                beta,
+                bond_energy,
+                driving_chemical_potential,
+                phosphorylation_rate_constant,
+                zeta_chain_extension_stdev,
+                reaction_box_size,
+                t_cell_receptor_position,
+            );
+            serialize::serialize_object(
+                format!("{}/chain.json", &sim_dir),
+                &chain,
+                &mut archive_builder,
+            )?;
+
+            let mut system = System::random(width, height, Box::new(chain.clone()), odds);
+            serialize::serialize_object(
+                format!("{}/initial_conditions.json", &sim_dir),
+                &system.state,
+                &mut archive_builder,
+            )?;
+
+            particle_number.initialize(&system);
+
+            let mut reactions: Vec<(f64, Reaction<SiteState>)> = Vec::new();
+            loop {
+                let concentration = *(particle_number
+                    .value()
+                    .get(&SiteState::Bonding)
+                    .unwrap_or(&0)) as f64
+                    / system.state.len() as f64;
+                if concentration >= threshold {
+                    serialize::serialize_object(
+                        format!("{}/outcome.txt", &sim_dir),
+                        &format!("{}", system.time),
+                        &mut archive_builder,
+                    )?;
+                    break;
+                }
+
+                let (dt, reaction) = system.next_reaction();
+                reactions.push((dt, reaction));
+
+                particle_number.update(&system, dt, reaction);
+
+                system.update(dt, reaction);
+            }
+            serialize::serialize_object(
+                format!("{}/reactions.json", &sim_dir),
+                &reactions,
+                &mut archive_builder,
+            )?;
+        }
+    }
+
+    archive_builder.finish()?;
+
+    Ok(())
 }
 
 fn coexistence() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let (width, height) = (20, 4);
+    let (width, height) = (19, 19);
 
     let beta = 1.0;
     let bond_energy = -2.95;
     let center_driving_chemical_potential = 1.87;
     let driving_chemical_potentials =
         (-3..4).map(|i| i as f64 / 25. + center_driving_chemical_potential);
-    let inert_mu = -3.150;
-    let bonding_mu = -4.826;
-    let inert_to_bonding_rate = 0.1;
+    let phosphorylation_rate_constant = 0.1;
+    let zeta_chain_extension_stdev = 3.;
+    let reaction_box_size = 0.;
+    let t_cell_receptor_position = [10, 10];
 
     let outfile = fs::File::create("data/coexistence.tar.gz")?;
     let zipper = GzEncoder::new(outfile, Compression::default());
     let mut archive_builder = tar::Builder::new(zipper);
 
-    let chain = HomogenousChain::new(
+    let chain = TCellChain::new(
         beta,
         bond_energy,
         center_driving_chemical_potential,
-        (inert_mu * beta).exp(),
-        (bonding_mu * beta).exp(),
-        inert_to_bonding_rate,
+        phosphorylation_rate_constant,
+        zeta_chain_extension_stdev,
+        reaction_box_size,
+        t_cell_receptor_position,
     );
 
     let until_step = 10_000;
@@ -41,7 +226,7 @@ fn coexistence() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let mut solid_concentration = 1.;
     let phase_concentration_category = "phase_concentration";
     for (name, state, concentration) in [
-        ("gas", SiteState::Empty, &mut gas_concentration),
+        ("gas", SiteState::Inert, &mut gas_concentration),
         ("solid", SiteState::Bonding, &mut solid_concentration),
     ] {
         let mut system = System::full(width, height, Box::new(chain.clone()), state);
@@ -79,9 +264,9 @@ fn coexistence() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 &mut running_sum,
                 &mut time_measured,
                 &|system: &System| {
-                    1. - *(system
+                    *(system
                         .particle_number()
-                        .get(&SiteState::Empty)
+                        .get(&SiteState::Bonding)
                         .unwrap_or(&0)) as f64
                         / system.state.len() as f64
                 },
@@ -102,6 +287,10 @@ fn coexistence() -> Result<(), Box<dyn std::error::Error + 'static>> {
     println!("Gas: {}", gas_concentration);
     println!("Solid: {}", solid_concentration);
 
+    archive_builder.finish()?;
+
+    return Ok(());
+
     let mut initial_state = Array2::default((height, width));
     initial_state
         .slice_mut(s![.., 0..width / 2])
@@ -117,13 +306,14 @@ fn coexistence() -> Result<(), Box<dyn std::error::Error + 'static>> {
                 i + 1
             );
 
-            let chain = HomogenousChain::new(
+            let chain = TCellChain::new(
                 beta,
                 bond_energy,
                 driving_chemical_potential,
-                (inert_mu * beta).exp(),
-                (bonding_mu * beta).exp(),
-                inert_to_bonding_rate,
+                phosphorylation_rate_constant,
+                zeta_chain_extension_stdev,
+                reaction_box_size,
+                t_cell_receptor_position,
             );
             serialize::serialize_object(
                 format!("{}/chain.json", &sim_dir),
@@ -180,4 +370,27 @@ fn coexistence() -> Result<(), Box<dyn std::error::Error + 'static>> {
     archive_builder.finish()?;
 
     Ok(())
+}
+
+fn concentration_near_tcr(system: &System, chain: &TCellChain) -> f64 {
+    let mut num_bonding = 0;
+    let mut total = 0;
+    for (i, state) in system.state.iter().enumerate() {
+        let [x, y] = system.pos_of_ith_site(i);
+        let (x, y) = (x as f64, y as f64);
+        let (dx, dy) = (
+            x - chain.t_cell_receptor_position[0] as f64,
+            y - chain.t_cell_receptor_position[1] as f64,
+        );
+        let distance_squared = (dx * dx + dy * dy);
+        if distance_squared / chain.zeta_chain_extension_stdev.powi(2) > 1. {
+            continue;
+        }
+        total += 1;
+        if *state != SiteState::Bonding {
+            continue;
+        }
+        num_bonding += 1;
+    }
+    num_bonding as f64 / total as f64
 }
