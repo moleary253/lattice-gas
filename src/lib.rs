@@ -255,25 +255,40 @@ impl MarkovChain<SiteState> for HomogenousChain {
 ///
 /// Assumptions:
 /// - Zeta-chain / Zap70 system can be modeled well by a Gaussian approximation to a WLC
-///   - Neglects excluded volume with cell wall anywhere on the WLC except at the end.
+///     - Neglects excluded volume with cell wall anywhere on the WLC except at the end.
 /// - Lck recruitment is not important
 /// - Zap70 concentration is not time dependent
 /// - Zap70 + LAT reaction involves interactions between one LAT and one Zap70
+/// - Reaction size is very small for Zap70-LAT reaction
+/// - Right now, diffusion limited, NOT bond limited
 ///
 /// Allowed Reactions:
 /// - Diffusion with rate constant 1
 /// - pLAT(B) to LAT(I) & reverse, catalyzed by Zap70, pushing towards pLAT with Delta mu
+///     - With Michaelis-Mentin kinetics
+/// - pLAT(B) to LAT(I) & reverse, catalyzed by phosphatase, undriven
+///     - With Michaelis-Mentin kinetics
 ///
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TCellChain {
     pub beta: f64,
+
     pub bond_energy: f64,
-    pub driving_chemical_potential: f64,
-    pub phosphorylation_rate_constant: f64,
+
+    pub kinase_chemical_potential: f64,
+    pub kinase_rate_constant: f64,
+    pub kinase_michaelis_constant: f64,
 
     pub zeta_chain_extension_stdev: f64,
-    pub reaction_box_size: f64,
     pub t_cell_receptor_position: [usize; 2],
+
+    pub phosphatase_chemical_potential: f64,
+    pub phosphatase_rate_constant: f64,
+    pub phosphatase_michaelis_constant: f64,
+
+    kinase_concentration: Option<Array2<f64>>,
+    energy: Option<Array2<i32>>,
+    concentration_near_receptor: Option<f64>,
 }
 
 /*
@@ -283,26 +298,41 @@ impl TCellChain {
     pub fn new(
         beta: f64,
         bond_energy: f64,
-        driving_chemical_potential: f64,
-        phosphorylation_rate_constant: f64,
+        kinase_chemical_potential: f64,
+        kinase_rate_constant: f64,
+        kinase_michaelis_constant: f64,
         zeta_chain_extension_stdev: f64,
-        reaction_box_size: f64,
         t_cell_receptor_position: [usize; 2],
+        phosphatase_chemical_potential: f64,
+        phosphatase_rate_constant: f64,
+        phosphatase_michaelis_constant: f64,
     ) -> Self {
         TCellChain {
             beta,
             bond_energy,
-            driving_chemical_potential,
-            phosphorylation_rate_constant,
+            kinase_chemical_potential,
+            kinase_rate_constant,
+            kinase_michaelis_constant,
             zeta_chain_extension_stdev,
-            reaction_box_size,
             t_cell_receptor_position,
+            phosphatase_chemical_potential,
+            phosphatase_rate_constant,
+            phosphatase_michaelis_constant,
+            kinase_concentration: None,
+            energy: None,
+            concentration_near_receptor: None,
         }
     }
 }
 
 impl TCellChain {
     pub fn site_energy(&self, system: &System, position: [usize; 2]) -> f64 {
+        match &self.energy {
+            Some(energy) => {
+                return energy[position] as f64 * self.bond_energy;
+            }
+            None => {}
+        }
         let mut energy = 0.;
         let [x, y] = position;
         let (x, y) = (x as i32, y as i32);
@@ -318,7 +348,13 @@ impl TCellChain {
         energy
     }
 
-    pub fn zap70_probability(&self, position: [usize; 2]) -> f64 {
+    pub fn kinase_probability(&self, position: [usize; 2]) -> f64 {
+        match &self.kinase_concentration {
+            Some(kinase_concentration) => {
+                return kinase_concentration[position];
+            }
+            None => {}
+        }
         let [x, y] = position;
         let (x, y) = (x as f64, y as f64);
         let (dx, dy) = (
@@ -332,21 +368,129 @@ impl TCellChain {
             .sqrt()
             * (3. * distance_squared / 2. / self.zeta_chain_extension_stdev.powi(2)).exp()
     }
+
+    pub fn substrate_concentration_near_receptor(&self, system: &System) -> f64 {
+        match self.concentration_near_receptor {
+            Some(concentration) => {
+                return concentration;
+            }
+            None => {}
+        }
+
+        let mut concentration = 0.0;
+        for (i, state) in system.state.iter().enumerate() {
+            if *state == SiteState::Empty {
+                continue;
+            }
+
+            let pos = system.pos_of_ith_site(i);
+
+            concentration += self.kinase_probability(pos)
+        }
+
+        return concentration;
+    }
+
+    pub fn initialize_cache(&mut self, system: &System) {
+        let mut energy = Array2::zeros(system.state.raw_dim());
+        let mut kinase_concentration = Array2::zeros(system.state.raw_dim());
+
+        for (i, state) in system.state.iter().enumerate() {
+            let pos = system.pos_of_ith_site(i);
+            kinase_concentration[pos] = self.kinase_probability(pos);
+
+            if *state != SiteState::Bonding {
+                continue;
+            }
+
+            for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+                let adjacent_pos = [
+                    (pos[0] as i32 + dx) as usize % system.state.shape()[0],
+                    (pos[1] as i32 + dy) as usize % system.state.shape()[1],
+                ];
+                energy[adjacent_pos] += 1;
+            }
+        }
+
+        self.energy = Some(energy);
+        self.kinase_concentration = Some(kinase_concentration);
+        self.concentration_near_receptor = Some(self.substrate_concentration_near_receptor(system));
+    }
+
+    pub fn update_cache(&mut self, system: &System, _delta_t: f64, reaction: Reaction<SiteState>) {
+        let energy: &mut Array2<i32> = match &mut self.energy {
+            Some(energy) => energy,
+            None => {
+                return;
+            }
+        };
+
+        match reaction {
+            Reaction::PointChange {
+                from,
+                to,
+                position: pos,
+            } => {
+                let change = if from == SiteState::Bonding {
+                    1
+                } else if to == SiteState::Bonding {
+                    -1
+                } else {
+                    return;
+                };
+                for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+                    let adjacent_pos = [
+                        (pos[0] as i32 + dx) as usize % system.state.shape()[0],
+                        (pos[1] as i32 + dy) as usize % system.state.shape()[1],
+                    ];
+                    energy[adjacent_pos] += change;
+                }
+            }
+            Reaction::Diffusion { from, to } => {
+                let change = if system.state[from] == SiteState::Bonding {
+                    1
+                } else if system.state[to] == SiteState::Bonding {
+                    -1
+                } else {
+                    return;
+                };
+                for (pos, multiplier) in [(from, -1), (to, 1)] {
+                    for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+                        let adjacent_pos = [
+                            (pos[0] as i32 + dx) as usize % system.state.shape()[0],
+                            (pos[1] as i32 + dy) as usize % system.state.shape()[1],
+                        ];
+                        energy[adjacent_pos] += change * multiplier;
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl MarkovChain<SiteState> for TCellChain {
     fn rate(&self, system: &System, reaction: Reaction<SiteState>) -> f64 {
         match reaction {
             Reaction::PointChange { from, to, position } => match (from, to) {
-                (SiteState::Inert, SiteState::Bonding) => self.phosphorylation_rate_constant,
+                (SiteState::Inert, SiteState::Bonding) => {
+                    self.kinase_rate_constant * self.kinase_probability(position)
+                        / (self.kinase_michaelis_constant
+                            + self.substrate_concentration_near_receptor(system))
+                        + self.phosphatase_rate_constant
+                            * (self.beta
+                                * (self.site_energy(system, position)
+                                    + self.phosphatase_chemical_potential))
+                                .exp()
+                }
 
                 (SiteState::Bonding, SiteState::Inert) => {
-                    self.phosphorylation_rate_constant
-                        * self.zap70_probability(position)
+                    self.kinase_rate_constant * self.kinase_probability(position)
+                        / (self.kinase_michaelis_constant
+                            + self.substrate_concentration_near_receptor(system))
                         * (self.beta
-                            * (self.site_energy(system, position)
-                                + self.driving_chemical_potential))
+                            * (self.site_energy(system, position) + self.kinase_chemical_potential))
                             .exp()
+                        + self.phosphatase_rate_constant
                 }
                 _ => 0.,
             },
@@ -462,41 +606,27 @@ impl Statistic<HashMap<SiteState, usize>> for ParticleNumberStatistic {
 pub struct System {
     pub state: Array2<SiteState>,
     pub time: f64,
-
-    pub chain: Box<dyn MarkovChain<SiteState>>,
 }
 
 /*
  * Constructors
  */
 impl System {
-    pub fn empty(width: usize, height: usize, chain: Box<dyn MarkovChain<SiteState>>) -> Self {
+    pub fn empty(width: usize, height: usize) -> Self {
         System {
             state: Array2::default((height, width)),
             time: 0.,
-            chain,
         }
     }
 
-    pub fn full(
-        width: usize,
-        height: usize,
-        chain: Box<dyn MarkovChain<SiteState>>,
-        state: SiteState,
-    ) -> Self {
+    pub fn full(width: usize, height: usize, state: SiteState) -> Self {
         System {
             state: Array2::from_elem((height, width), state),
             time: 0.,
-            chain,
         }
     }
 
-    pub fn random(
-        width: usize,
-        height: usize,
-        chain: Box<dyn MarkovChain<SiteState>>,
-        odds: [(SiteState, f64); 3],
-    ) -> Self {
+    pub fn random(width: usize, height: usize, odds: [(SiteState, f64); 3]) -> Self {
         let mut state = Array2::default((height, width));
 
         let mut rng = rand::thread_rng();
@@ -512,19 +642,11 @@ impl System {
                 }
             }
         }
-        System {
-            state,
-            time: 0.,
-            chain,
-        }
+        System { state, time: 0. }
     }
 
-    pub fn with_state(chain: Box<dyn MarkovChain<SiteState>>, state: Array2<SiteState>) -> Self {
-        System {
-            state,
-            time: 0.,
-            chain,
-        }
+    pub fn with_state(state: Array2<SiteState>) -> Self {
+        System { state, time: 0. }
     }
 }
 
@@ -550,12 +672,12 @@ impl System {
  * Evolution
  */
 impl System {
-    pub fn next_reaction(&self) -> (f64, Reaction<SiteState>) {
-        let reactions = self.chain.allowed_reactions(&self);
+    pub fn next_reaction(&self, chain: &dyn MarkovChain<SiteState>) -> (f64, Reaction<SiteState>) {
+        let reactions = chain.allowed_reactions(&self);
         let mut partial_sums_of_rates: Vec<f64> = Vec::with_capacity(reactions.len());
         let mut sum = 0.;
         for reaction in reactions.iter() {
-            sum += self.chain.rate(&self, *reaction);
+            sum += chain.rate(&self, *reaction);
             partial_sums_of_rates.push(sum);
         }
         let partial_sums_of_rates = partial_sums_of_rates;
@@ -584,8 +706,8 @@ impl System {
         }
     }
 
-    pub fn simulate_one_step_inplace(&mut self) {
-        let (delta_t, reaction) = self.next_reaction();
+    pub fn simulate_one_step_inplace(&mut self, chain: &dyn MarkovChain<SiteState>) {
+        let (delta_t, reaction) = self.next_reaction(chain);
         self.update(delta_t, reaction);
     }
 }

@@ -31,7 +31,7 @@ def analyze(tar_archive=TARFILE, directory=DIRECTORY):
 
         times = {}
         droplet_counts = {}
-        independent_variable = "driving_chemical_potential"
+        independent_variable = "kinase_chemical_potential"
         for simulation in tqdm(simulations):
             if not os.path.exists(os.path.join(simulation, OUTCOME_FILE)):
                 continue
@@ -79,7 +79,9 @@ def plot(times, droplet_counts):
     pdfs = [gaussian_kde(time) for time in times]
     probabilities = (1 + np.arange(len(times[0]))) / len(times[0])
 
-    bins = np.linspace(0, 200, 40)
+    upper_time_limit = 5000
+
+    bins = np.linspace(0, upper_time_limit, 40)
     sample_times = np.linspace(np.min(bins), np.max(bins), 100)
     for i in range(len(times[:,0])):
         n, x, _ = ax1.hist(times[i], bins=bins, 
@@ -88,11 +90,11 @@ def plot(times, droplet_counts):
         ax2.plot(sample_times, pdfs[i](sample_times), label=f"{keys[i]:.2f}", color=f"C{i+1}")
 
     ax1.legend()
-    ax1.set(xlim=[0, 200])
+    ax1.set(xlim=[0, upper_time_limit])
     ax1.set(xlabel="$t$", ylabel="Density")
 
     ax2.legend()
-    ax2.set(xlim=[0, 200])
+    ax2.set(xlim=[0, upper_time_limit])
     ax2.set(xlabel="$t$", ylabel="$\\hat p(t)$")
 
     fig3, ax3 = plt.subplots()
@@ -102,7 +104,7 @@ def plot(times, droplet_counts):
         ax3.plot(sample_times, ks[i], color=f"C{i+1}", label=f"{keys[i]:.2f}")
 
     ax3.legend()
-    ax3.set(xlim=[0, 200])
+    ax3.set(xlim=[0, upper_time_limit])
     ax3.set(xlabel="$t$", ylabel="$k$")
 
     fig4, ax4 = plt.subplots()
