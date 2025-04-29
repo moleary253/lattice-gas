@@ -176,7 +176,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("Loading...")
-    chain, initial_conditions, reactions = load.natural_input(args.filename)
+    chain, initial_conditions, reactions, final_conditions = load.natural_input(args.filename)
 
     if args.interactive_image:
         print("Graphing Interactive Image...")

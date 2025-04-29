@@ -7,6 +7,7 @@ import numpy as np
 CHAIN_FILE = "chain.json"
 INITIAL_CONDITIONS_FILE = "initial_conditions.json"
 REACTIONS_FILE = "reactions.json"
+FINAL_STATE_FILE = "final_state.json"
 
 TYPE = "reaction_type"
 POINT_CHANGE = "PointChange"
@@ -29,9 +30,10 @@ def natural_input(string, clear_directory_after=True):
     located at path at [y] will be loaded.
     :param clear_directory_after: Default True. Whether to delete the extracted tar archive, if
     applicable.
-    :returns (parameters, initial_conditions, reactions) where parameters is the parameters to the
-    Markov chain for the simulation, initial conditions is the initial conditions of the simulation,
-    and reactions is a time series of the reactions that occurred during the simulation.
+    :returns (parameters, initial_conditions, reactions, final_state) where parameters is the
+    parameters to the Markov chain for the simulation, initial conditions is the initial conditions
+    of the simulation, reactions is a time series of the reactions that occurred during the
+    simulation, and final_state is the final state of the simulation.
     """
     if ".tar.gz" in string:
         index = string.find(".tar.gz")+len(".tar.gz")
@@ -54,7 +56,12 @@ def directory(directory):
     Markov chain for the simulation, initial conditions is the initial conditions of the simulation,
     and reactions is a time series of the reactions that occurred during the simulation.
     """
-    return chain(directory), initial_conditions(directory), reactions(directory)
+    return (
+        chain(directory),
+        initial_conditions(directory),
+        reactions(directory),
+        final_state(directory),
+    )
 
 
 def chain(directory):
@@ -120,6 +127,27 @@ def reactions(directory):
     ]
     
     return reactions
+
+
+def final_state(directory):
+    """Loads the final state of a simulation.
+
+    :param directory: The directory the simulation is located in.
+    :returns a 2d array of integers representing the initial state at each site in the simulation,
+    or None if no final state was stored.
+    """
+    if not os.path.exists(os.path.join(directory, FINAL_STATE_FILE)):
+        return None
+
+    with open(os.path.join(directory, FINAL_STATE_FILE)) as f:
+        final_state_json = json.load(f)
+    
+    final_state= np.array([
+        TRANSLATE[entry]
+        for entry in final_state_json["data"]
+    ]).reshape(final_state_json["dim"])
+
+    return final_state
 
 
 def read_tar_archive(archive_path):

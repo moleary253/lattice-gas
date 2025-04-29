@@ -3,7 +3,13 @@ use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod binary_sum_tree;
+pub mod boundary_condition;
+pub mod ending_criterion;
+pub mod markov_chain;
+pub mod reaction;
 pub mod serialize;
+pub mod simulate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SiteState {
@@ -18,7 +24,7 @@ impl Default for SiteState {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum Reaction<T>
 where
     T: Clone,
@@ -156,14 +162,14 @@ impl HomogenousChain {
         bonding_fugacity: f64,
         inert_to_bonding_rate: f64,
     ) -> Self {
-        HomogenousChain {
-            beta: 1.,
+        HomogenousChain::new(
+            1.,
             bond_energy,
             driving_chemical_potential,
             inert_fugacity,
             bonding_fugacity,
             inert_to_bonding_rate,
-        }
+        )
     }
 
     pub fn new(
@@ -629,10 +635,10 @@ impl System {
     pub fn random(width: usize, height: usize, odds: [(SiteState, f64); 3]) -> Self {
         let mut state = Array2::default((height, width));
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let sum_of_weights = odds.iter().fold(0., |sum, (_, w)| sum + w);
         for site in state.iter_mut() {
-            let rand_number = rng.gen::<f64>() * sum_of_weights;
+            let rand_number = rng.random::<f64>() * sum_of_weights;
             let mut sum = 0.;
             for (state, weight) in odds {
                 sum += weight;
@@ -672,7 +678,11 @@ impl System {
  * Evolution
  */
 impl System {
-    pub fn next_reaction(&self, chain: &dyn MarkovChain<SiteState>) -> (f64, Reaction<SiteState>) {
+    pub fn next_reaction(
+        &self,
+        chain: &dyn MarkovChain<SiteState>,
+        rng: &mut impl Rng,
+    ) -> (f64, Reaction<SiteState>) {
         let reactions = chain.allowed_reactions(&self);
         let mut partial_sums_of_rates: Vec<f64> = Vec::with_capacity(reactions.len());
         let mut sum = 0.;
@@ -682,9 +692,8 @@ impl System {
         }
         let partial_sums_of_rates = partial_sums_of_rates;
 
-        let mut rng = rand::thread_rng();
-        let tau = -(rng.gen::<f64>()).ln() / partial_sums_of_rates.last().unwrap();
-        let chosen_partial_sum = rng.gen::<f64>() * partial_sums_of_rates.last().unwrap();
+        let tau = -(rng.random::<f64>()).ln() / partial_sums_of_rates.last().unwrap();
+        let chosen_partial_sum = rng.random::<f64>() * partial_sums_of_rates.last().unwrap();
 
         let chosen_reaction =
             reactions[(&partial_sums_of_rates).partition_point(|a| *a <= chosen_partial_sum)];
@@ -706,8 +715,12 @@ impl System {
         }
     }
 
-    pub fn simulate_one_step_inplace(&mut self, chain: &dyn MarkovChain<SiteState>) {
-        let (delta_t, reaction) = self.next_reaction(chain);
+    pub fn simulate_one_step_inplace(
+        &mut self,
+        chain: &dyn MarkovChain<SiteState>,
+        rng: &mut impl Rng,
+    ) {
+        let (delta_t, reaction) = self.next_reaction(chain, rng);
         self.update(delta_t, reaction);
     }
 }
