@@ -8,6 +8,7 @@ CHAIN_FILE = "chain.json"
 INITIAL_CONDITIONS_FILE = "initial_conditions.json"
 REACTIONS_FILE = "reactions.json"
 FINAL_STATE_FILE = "final_state.json"
+SIZES_FILE = "sizes.json"
 
 TYPE = "reaction_type"
 POINT_CHANGE = "PointChange"
@@ -20,6 +21,17 @@ SPECIES = ["Empty", "Inert", "Bonding"]
 TRANSLATE = {"Empty": EMPTY, "Inert": INERT, "Bonding": BONDING}
 
 TEMP_ARCHIVE_PATH = "data/current"
+
+
+def unpack_natural_input(string):
+    if ".tar.gz" in string:
+        index = string.find(".tar.gz")+len(".tar.gz")
+        tar_archive = string[:index]
+        member_location = string[index+1:]
+        unpack_tar_archive(tar_archive, TEMP_ARCHIVE_PATH)
+        return os.path.join(TEMP_ARCHIVE_PATH, member_location)
+    else:
+        return string
 
 
 def natural_input(string, clear_directory_after=True):
@@ -93,6 +105,18 @@ def initial_conditions(directory):
     return initial_conditions
 
 
+def sizes(directory):
+    """Loads the series of maximum droplet sizes from a simulation
+
+    :param directory: The directory the simulation is located in.
+    :returns a 2d array of (time, size) points
+    """
+    with open(os.path.join(directory, SIZES_FILE)) as f:
+        sizes_json = json.load(f)
+    
+    return np.array(sizes_json)
+
+
 def reactions(directory):
     """Loads the reactions that took place in a simulation.
 
@@ -106,6 +130,9 @@ def reactions(directory):
         "position": [int x, int y]
     }
     """
+    if not os.path.exists(os.path.join(directory, REACTIONS_FILE)):
+        return None
+    
     with open(os.path.join(directory, REACTIONS_FILE)) as f:
         reactions_json = json.load(f)
 

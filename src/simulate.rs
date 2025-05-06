@@ -26,7 +26,7 @@ pub fn simulate<T: Clone, R: Reaction<T> + Clone>(
         }
     }
 
-    ending_criterion.initialize(&state, &chain);
+    ending_criterion.initialize(&state, &chain, &boundary);
     chain.initialize(&state, &boundary);
     let mut reactions = Vec::new();
 
@@ -35,16 +35,16 @@ pub fn simulate<T: Clone, R: Reaction<T> + Clone>(
         let chosen_partial_sum = rng.random::<f64>() * rates.sum();
         let reaction_id = rates.search(chosen_partial_sum);
         let reaction = chain.reaction(&state, reaction_id);
-        reactions.push((dt, reaction.clone()));
 
-        ending_criterion.update(&state, &chain, dt, reaction.clone());
+        reactions.push((dt, reaction.clone()));
+        reaction.apply(&mut state);
+
+        ending_criterion.update(&state, &chain, &boundary, dt, reaction.clone());
+        chain.on_reaction(&state, &boundary, reaction_id, dt);
+
         if ending_criterion.should_end() {
             break;
         }
-
-        chain.on_reaction(&state, &boundary, reaction_id, dt);
-
-        reaction.apply(&mut state);
 
         for location in reaction.indicies_updated(&state) {
             for &reaction_id in reactions_depending_on_locations[location].iter() {

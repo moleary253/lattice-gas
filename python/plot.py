@@ -152,6 +152,11 @@ def fraction_time_correlation(initial_conditions, reactions, species="Bonding", 
     plt.show()
 
 
+def graph_sizes(sizes):
+    plt.step(sizes[:,0], sizes[:,1], where="post")
+    plt.show()
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -173,6 +178,11 @@ if __name__ == "__main__":
         help="Determines the time correlation of the specified species",
         metavar="STATE"
     )
+    parser.add_argument(
+        "--sizes",
+        action="store_true",
+        help="A trace of the size of the largest droplet over time",
+    )
     args = parser.parse_args()
 
     print("Loading...")
@@ -189,3 +199,11 @@ if __name__ == "__main__":
     if args.time_correlation is not None:
         print("Graphing Time Correlations...")
         fraction_time_correlation(initial_conditions, reactions, species=args.time_correlation)
+
+    if args.sizes:
+        print("Graphing Sizes...")
+        directory = load.unpack_natural_input(args.filename)
+        sizes = load.sizes(directory)
+        import shutil
+        shutil.rmtree(load.TEMP_ARCHIVE_PATH)
+        graph_sizes(sizes)

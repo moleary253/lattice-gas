@@ -3,6 +3,7 @@ use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod analysis;
 pub mod binary_sum_tree;
 pub mod boundary_condition;
 pub mod ending_criterion;
@@ -125,127 +126,6 @@ impl MarkovChain<SiteState> for IsingChain {
             let pos = system.pos_of_ith_site(i);
 
             for next_state in [SiteState::Empty, SiteState::Inert] {
-                if *state == next_state {
-                    continue;
-                }
-                reactions.push(Reaction::point_change(*state, next_state, pos));
-            }
-        }
-
-        return reactions;
-    }
-}
-
-/*
- * Describes a homogenous bonding to inert reaction as described in Yeongik's PRL in 2023.
- * Sets $D$ to 1.
- */
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HomogenousChain {
-    pub beta: f64,
-    pub bond_energy: f64,
-    pub driving_chemical_potential: f64,
-
-    pub inert_fugacity: f64,
-    pub bonding_fugacity: f64,
-    pub inert_to_bonding_rate: f64,
-}
-
-/*
- * Constructors
- */
-impl HomogenousChain {
-    pub fn beta_1(
-        bond_energy: f64,
-        driving_chemical_potential: f64,
-        inert_fugacity: f64,
-        bonding_fugacity: f64,
-        inert_to_bonding_rate: f64,
-    ) -> Self {
-        HomogenousChain::new(
-            1.,
-            bond_energy,
-            driving_chemical_potential,
-            inert_fugacity,
-            bonding_fugacity,
-            inert_to_bonding_rate,
-        )
-    }
-
-    pub fn new(
-        beta: f64,
-        bond_energy: f64,
-        driving_chemical_potential: f64,
-        inert_fugacity: f64,
-        bonding_fugacity: f64,
-        inert_to_bonding_rate: f64,
-    ) -> Self {
-        HomogenousChain {
-            beta,
-            bond_energy,
-            driving_chemical_potential,
-            inert_fugacity,
-            bonding_fugacity,
-            inert_to_bonding_rate,
-        }
-    }
-}
-
-impl HomogenousChain {
-    pub fn site_energy(&self, system: &System, position: [usize; 2]) -> f64 {
-        let mut energy = 0.;
-        let [x, y] = position;
-        let (x, y) = (x as i32, y as i32);
-        for (dx, dy) in [(-1, 0), (1, 0), (0, 1), (0, -1)] {
-            let adjacent_state = system.state[[
-                (dx + x).rem_euclid(system.state.shape()[0] as i32) as usize,
-                (dy + y).rem_euclid(system.state.shape()[1] as i32) as usize,
-            ]];
-            if adjacent_state == SiteState::Bonding {
-                energy += self.bond_energy;
-            }
-        }
-        energy
-    }
-
-    pub fn delta_f_res(&self) -> f64 {
-        (self.inert_fugacity / self.bonding_fugacity).ln() / self.beta
-    }
-}
-
-impl MarkovChain<SiteState> for HomogenousChain {
-    fn rate(&self, system: &System, reaction: Reaction<SiteState>) -> f64 {
-        match reaction {
-            Reaction::PointChange { from, to, position } => match (from, to) {
-                (SiteState::Empty, SiteState::Inert) => self.inert_fugacity,
-                (SiteState::Empty, SiteState::Bonding) => self.bonding_fugacity,
-
-                (SiteState::Inert, SiteState::Empty) => 1.,
-                (SiteState::Inert, SiteState::Bonding) => self.inert_to_bonding_rate,
-
-                (SiteState::Bonding, SiteState::Empty) => {
-                    (self.beta * self.site_energy(system, position)).exp()
-                }
-                (SiteState::Bonding, SiteState::Inert) => {
-                    self.inert_to_bonding_rate * self.inert_fugacity / self.bonding_fugacity
-                        * (self.beta
-                            * (self.site_energy(system, position)
-                                + self.driving_chemical_potential))
-                            .exp()
-                }
-
-                _ => 0.,
-            },
-            _ => 0.,
-        }
-    }
-
-    fn allowed_reactions(&self, system: &System) -> Vec<Reaction<SiteState>> {
-        let mut reactions = Vec::with_capacity(system.state.len() * 2);
-        for (i, state) in system.state.iter().enumerate() {
-            let pos = system.pos_of_ith_site(i);
-
-            for next_state in [SiteState::Empty, SiteState::Inert, SiteState::Bonding] {
                 if *state == next_state {
                     continue;
                 }
