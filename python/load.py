@@ -8,9 +8,10 @@ CHAIN_FILE = "chain.json"
 INITIAL_CONDITIONS_FILE = "initial_conditions.json"
 REACTIONS_FILE = "reactions.json"
 FINAL_STATE_FILE = "final_state.json"
+FINAL_TIME_FILE = "final_time.json"
 SIZES_FILE = "sizes.json"
 
-TYPE = "reaction_type"
+TYPE = "type"
 POINT_CHANGE = "PointChange"
 DIFFUSION = "Diffusion"
 
@@ -32,6 +33,10 @@ def unpack_natural_input(string):
         return os.path.join(TEMP_ARCHIVE_PATH, member_location)
     else:
         return string
+
+
+def clean_up_temp_files():
+    shutil.rmtree(TEMP_ARCHIVE_PATH)
 
 
 def natural_input(string, clear_directory_after=True):
@@ -76,7 +81,7 @@ def directory(directory):
     )
 
 
-def chain(directory):
+def chain(directory=TEMP_ARCHIVE_PATH):
     """Loads the parameters of the Markov chain governing rates in the simulation.
 
     :param directory: The directory the simulation is located in.
@@ -88,7 +93,7 @@ def chain(directory):
     return chain_json
 
 
-def initial_conditions(directory):
+def initial_conditions(directory=TEMP_ARCHIVE_PATH):
     """Loads the initial conditions of a simulation.
 
     :param directory: The directory the simulation is located in.
@@ -97,15 +102,14 @@ def initial_conditions(directory):
     with open(os.path.join(directory, INITIAL_CONDITIONS_FILE)) as f:
         initial_conditions_json = json.load(f)
     
-    initial_conditions = np.array([
-        TRANSLATE[entry]
-        for entry in initial_conditions_json["data"]
-    ]).reshape(initial_conditions_json["dim"])
+    initial_conditions = np.array(
+        initial_conditions_json["data"]
+    ).reshape(initial_conditions_json["dim"])
 
     return initial_conditions
 
 
-def sizes(directory):
+def sizes(directory=TEMP_ARCHIVE_PATH):
     """Loads the series of maximum droplet sizes from a simulation
 
     :param directory: The directory the simulation is located in.
@@ -117,7 +121,7 @@ def sizes(directory):
     return np.array(sizes_json)
 
 
-def reactions(directory):
+def reactions(directory=TEMP_ARCHIVE_PATH):
     """Loads the reactions that took place in a simulation.
 
     :param directory: The directory the simulation is located in.
@@ -140,8 +144,8 @@ def reactions(directory):
         {
             TYPE: POINT_CHANGE,
             "dt": dt,
-            "from": TRANSLATE[reaction[POINT_CHANGE]["from"]],
-            "to": TRANSLATE[reaction[POINT_CHANGE]["to"]],
+            "from": reaction[POINT_CHANGE]["from"],
+            "to": reaction[POINT_CHANGE]["to"],
             "position": reaction[POINT_CHANGE]["position"]
         } if POINT_CHANGE in reaction
         else {
@@ -156,7 +160,7 @@ def reactions(directory):
     return reactions
 
 
-def final_state(directory):
+def final_state(directory=TEMP_ARCHIVE_PATH):
     """Loads the final state of a simulation.
 
     :param directory: The directory the simulation is located in.
@@ -169,12 +173,28 @@ def final_state(directory):
     with open(os.path.join(directory, FINAL_STATE_FILE)) as f:
         final_state_json = json.load(f)
     
-    final_state= np.array([
-        TRANSLATE[entry]
-        for entry in final_state_json["data"]
-    ]).reshape(final_state_json["dim"])
+    final_state= np.array(
+        [final_state_json["data"]],
+        dtype=np.dtype("u4"),
+    ).reshape(final_state_json["dim"])
 
     return final_state
+
+
+def final_time(directory=TEMP_ARCHIVE_PATH):
+    """Loads the final time the simulation reached.
+
+    :param directory: The directory the simulation is located in.
+    :returns the time at which the simulation ended,
+    or None if no final time was stored.
+    """
+    if not os.path.exists(os.path.join(directory, FINAL_TIME_FILE)):
+        return None
+
+    with open(os.path.join(directory, FINAL_TIME_FILE)) as f:
+        final_time_json = json.load(f)
+    
+    return float(final_time_json)
 
 
 def read_tar_archive(archive_path):

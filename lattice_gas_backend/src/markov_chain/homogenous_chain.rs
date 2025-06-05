@@ -1,12 +1,15 @@
 use super::*;
 use crate::reaction::BasicReaction;
-use crate::SiteState;
-use ndarray::Array2;
 use serde::{Deserialize, Serialize};
+
+pub const EMPTY: u32 = 0;
+pub const INERT: u32 = 1;
+pub const BONDING: u32 = 2;
 
 /// Describes a homogenous bonding to inert reaction as described in Yeongik's PRL in 2023.
 /// Sets $D$ to 1.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[pyclass]
 pub struct HomogenousChain {
     pub beta: f64,
     pub bond_energy: f64,
@@ -17,7 +20,9 @@ pub struct HomogenousChain {
     pub inert_to_bonding_rate: f64,
 }
 
+#[pymethods]
 impl HomogenousChain {
+    #[new]
     pub fn new(
         beta: f64,
         bond_energy: f64,
@@ -40,13 +45,13 @@ impl HomogenousChain {
 impl HomogenousChain {
     pub fn site_energy(
         &self,
-        state: &Array2<SiteState>,
-        boundary: &impl BoundaryCondition<SiteState>,
+        state: &ArrayView2<u32>,
+        boundary: &Box<dyn BoundaryCondition<u32>>,
         position: [usize; 2],
     ) -> f64 {
         let mut energy = 0.;
         for adjacent_state in boundary.adjacent(&state, position) {
-            if adjacent_state == SiteState::Bonding {
+            if adjacent_state == 2 {
                 energy += self.bond_energy;
             }
         }
@@ -57,11 +62,7 @@ impl HomogenousChain {
         (self.inert_fugacity / self.bonding_fugacity).ln() / self.beta
     }
 
-    pub fn is_possible(
-        &self,
-        state: &Array2<SiteState>,
-        reaction: BasicReaction<SiteState>,
-    ) -> bool {
+    pub fn is_possible(&self, state: &ArrayView2<u32>, reaction: BasicReaction<u32>) -> bool {
         match reaction {
             BasicReaction::PointChange {
                 from,
@@ -73,29 +74,34 @@ impl HomogenousChain {
     }
 }
 
-impl MarkovChain<SiteState, BasicReaction<SiteState>> for HomogenousChain {
+impl MarkovChain<u32, BasicReaction<u32>> for HomogenousChain {
     fn initialize(
         &mut self,
-        _state: &Array2<SiteState>,
-        _boundary: &impl BoundaryCondition<SiteState>,
+        _state: &ArrayView2<u32>,
+        _boundary: &Box<dyn BoundaryCondition<u32>>,
     ) {
     }
 
     fn on_reaction(
         &mut self,
-        _state: &Array2<SiteState>,
-        _boundary: &impl BoundaryCondition<SiteState>,
+        _state: &ArrayView2<u32>,
+        _boundary: &Box<dyn BoundaryCondition<u32>>,
         _reaction_id: usize,
         _dt: f64,
     ) {
     }
 
-    fn num_possible_reactions(&self, state: &Array2<SiteState>) -> usize {
+    fn num_possible_reactions(&self, state: &Array2<u32>) -> usize {
         state.len() * 6
     }
 
-    fn reaction(&self, state: &Array2<SiteState>, reaction_id: usize) -> BasicReaction<SiteState> {
-        let possible_states = [SiteState::Empty, SiteState::Inert, SiteState::Bonding];
+    fn reaction(
+        &self,
+        state: &ArrayView2<u32>,
+        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        reaction_id: usize,
+    ) -> BasicReaction<u32> {
+        let possible_states = [EMPTY, INERT, BONDING];
         let position_index = reaction_id / 6;
         let position = [
             position_index / state.shape()[1],
@@ -120,47 +126,46 @@ impl MarkovChain<SiteState, BasicReaction<SiteState>> for HomogenousChain {
 
     fn rate(
         &self,
-        state: &Array2<SiteState>,
-        boundary: &impl BoundaryCondition<SiteState>,
+        state: &ArrayView2<u32>,
+        boundary: &Box<dyn BoundaryCondition<u32>>,
         reaction_id: usize,
     ) -> f64 {
         use BasicReaction as BR;
-        use SiteState as SS;
-        let reaction = self.reaction(state, reaction_id);
+        let reaction = self.reaction(state, boundary, reaction_id);
         if !self.is_possible(state, reaction) {
             return 0.0;
         }
         match reaction {
             BR::PointChange {
-                from: SS::Empty,
-                to: SS::Inert,
+                from: EMPTY,
+                to: INERT,
                 position: _,
             } => self.inert_fugacity,
             BR::PointChange {
-                from: SS::Empty,
-                to: SS::Bonding,
+                from: EMPTY,
+                to: BONDING,
                 position: _,
             } => self.bonding_fugacity,
 
             BR::PointChange {
-                from: SS::Inert,
-                to: SS::Empty,
+                from: INERT,
+                to: EMPTY,
                 position: _,
             } => 1.,
             BR::PointChange {
-                from: SS::Inert,
-                to: SS::Bonding,
+                from: INERT,
+                to: BONDING,
                 position: _,
             } => self.inert_to_bonding_rate,
 
             BR::PointChange {
-                from: SS::Bonding,
-                to: SS::Empty,
+                from: BONDING,
+                to: EMPTY,
                 position,
             } => (self.beta * self.site_energy(state, boundary, position)).exp(),
             BR::PointChange {
-                from: SS::Bonding,
-                to: SS::Inert,
+                from: BONDING,
+                to: INERT,
                 position,
             } => {
                 self.inert_to_bonding_rate * self.inert_fugacity / self.bonding_fugacity
@@ -176,14 +181,14 @@ impl MarkovChain<SiteState, BasicReaction<SiteState>> for HomogenousChain {
 
     fn indicies_affecting_reaction(
         &mut self,
-        state: &Array2<SiteState>,
-        boundary: &impl BoundaryCondition<SiteState>,
+        state: &ArrayView2<u32>,
+        boundary: &Box<dyn BoundaryCondition<u32>>,
         reaction_id: usize,
     ) -> Vec<[usize; 2]> {
-        let reaction = self.reaction(state, reaction_id);
+        let reaction = self.reaction(state, boundary, reaction_id);
         match reaction {
             BasicReaction::PointChange { from, to, position } => match (from, to) {
-                (SiteState::Bonding, _) | (_, SiteState::Bonding) => {
+                (BONDING, _) | (_, BONDING) => {
                     let mut reactions = boundary.adjacent_indicies(&state, position);
                     reactions.push(position);
                     reactions

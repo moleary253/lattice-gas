@@ -186,7 +186,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("Loading...")
-    chain, initial_conditions, reactions, final_conditions = load.natural_input(args.filename)
+    directory = load.unpack_natural_input(args.filename)
+    initial_conditions = load.initial_conditions(directory)
+    reactions = load.reactions(directory)
+    final_conditions = load.final_state(directory)
 
     if args.interactive_image:
         print("Graphing Interactive Image...")
@@ -202,8 +205,8 @@ if __name__ == "__main__":
 
     if args.sizes:
         print("Graphing Sizes...")
-        directory = load.unpack_natural_input(args.filename)
         sizes = load.sizes(directory)
-        import shutil
-        shutil.rmtree(load.TEMP_ARCHIVE_PATH)
         graph_sizes(sizes)
+        
+    import shutil
+    shutil.rmtree(load.TEMP_ARCHIVE_PATH)

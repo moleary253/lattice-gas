@@ -1,18 +1,20 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
-// TODO(Myles): Add documentation
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[pyclass]
 pub struct Periodic;
 
+#[pymethods]
 impl Periodic {
+    #[new]
     pub fn new() -> Self {
         Periodic
     }
 }
 
 impl<T: Clone> BoundaryCondition<T> for Periodic {
-    fn get(&self, state: &Array2<T>, pos: [usize; 2]) -> T {
+    fn get(&self, state: &ArrayView2<T>, pos: [usize; 2]) -> T {
         state[[
             (pos[0]).rem_euclid(state.shape()[0]) as usize,
             (pos[1]).rem_euclid(state.shape()[1]) as usize,
@@ -20,7 +22,7 @@ impl<T: Clone> BoundaryCondition<T> for Periodic {
         .clone()
     }
 
-    fn adjacent_indicies(&self, state: &Array2<T>, pos: [usize; 2]) -> Vec<[usize; 2]> {
+    fn adjacent_indicies(&self, state: &ArrayView2<T>, pos: [usize; 2]) -> Vec<[usize; 2]> {
         let [x, y] = pos;
         let (x, y) = (x as i32, y as i32);
         return [(-1, 0), (1, 0), (0, 1), (0, -1)]
@@ -34,7 +36,7 @@ impl<T: Clone> BoundaryCondition<T> for Periodic {
             .collect();
     }
 
-    fn adjacent(&self, state: &Array2<T>, pos: [usize; 2]) -> Vec<T> {
+    fn adjacent(&self, state: &ArrayView2<T>, pos: [usize; 2]) -> Vec<T> {
         let [x, y] = pos;
         let (x, y) = (x as i32, y as i32);
         return [(-1, 0), (1, 0), (0, 1), (0, -1)]
