@@ -59,7 +59,6 @@ impl HomogenousNVTChain {
                 position,
             } => state[position] == from,
             BasicReaction::Diffusion { from, to } => state[from] != state[to],
-            _ => false,
         }
     }
 }
@@ -212,7 +211,6 @@ impl MarkovChain<u32, BasicReaction<u32>> for HomogenousNVTChain {
                 reactions.extend(boundary.adjacent_indicies(&state, to));
                 reactions
             }
-            _ => panic!("Unexpected reaction {:?}", reaction),
         }
     }
 }
