@@ -86,7 +86,7 @@ impl Droplets {
             let mut next = Vec::new();
             while to_check.len() > 0 {
                 for idx in to_check {
-                    if counts_as_droplet.contains(&state[idx]) || labeled[idx] != 0 {
+                    if !counts_as_droplet.contains(&state[idx]) || labeled[idx] != 0 {
                         continue;
                     }
                     droplet.push(idx);
@@ -263,146 +263,162 @@ impl Droplets {
     }
 }
 
-// #[cfg(test)]
-// pub mod tests {
-//     use crate::boundary_condition;
+#[cfg(test)]
+pub mod tests {
+    use crate::boundary_condition;
 
-//     use super::*;
-//     use ndarray::arr2;
+    use super::*;
+    use ndarray::arr2;
 
-//     #[test]
-//     fn initialization() {
-//         let state = arr2(&[
-//             [1, 0, 0, 1, 1],
-//             [1, 1, 0, 0, 0],
-//             [0, 1, 0, 1, 1],
-//             [0, 0, 0, 0, 1],
-//             [0, 0, 0, 1, 1],
-//             [0, 0, 1, 0, 0],
-//         ]);
-//         let boundary = boundary_condition::Periodic;
-//         let droplets = Droplets::new(&state, &boundary, &|site| *site == 1);
+    #[test]
+    fn initialization() {
+        let state: Array2<u32> = arr2(&[
+            [1, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0],
+            [0, 1, 0, 1, 1],
+            [0, 0, 0, 0, 1],
+            [0, 0, 0, 1, 1],
+            [0, 0, 1, 0, 0],
+        ]);
+        let boundary = boundary_condition::Periodic;
+        let droplets = Droplets::new(
+            &state.view(),
+            &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+            &vec![1],
+        );
 
-//         let expected_droplets = vec![
-//             vec![[0, 0], [1, 0], [1, 1], [2, 1], [0, 3], [0, 4]],
-//             vec![[2, 3], [2, 4], [3, 4], [4, 4], [4, 3]],
-//             vec![[5, 2]],
-//         ];
+        let expected_droplets = vec![
+            vec![[0, 0], [1, 0], [1, 1], [2, 1], [0, 3], [0, 4]],
+            vec![[2, 3], [2, 4], [3, 4], [4, 4], [4, 3]],
+            vec![[5, 2]],
+        ];
 
-//         let expected_labeled = arr2(&[
-//             [1, 0, 0, 1, 1],
-//             [1, 1, 0, 0, 0],
-//             [0, 1, 0, 2, 2],
-//             [0, 0, 0, 0, 2],
-//             [0, 0, 0, 2, 2],
-//             [0, 0, 3, 0, 0],
-//         ]);
+        let expected_labeled = arr2(&[
+            [1, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0],
+            [0, 1, 0, 2, 2],
+            [0, 0, 0, 0, 2],
+            [0, 0, 0, 2, 2],
+            [0, 0, 3, 0, 0],
+        ]);
 
-//         assert_eq!(droplets.droplets.len(), expected_droplets.len());
-//         for (droplet, expected) in droplets.droplets.iter().zip(expected_droplets) {
-//             assert_eq!(droplet.len(), expected.len());
-//             for index in droplet {
-//                 assert!(expected.contains(index));
-//             }
-//         }
+        assert_eq!(droplets.droplets.len(), expected_droplets.len());
+        for (droplet, expected) in droplets.droplets.iter().zip(expected_droplets) {
+            assert_eq!(droplet.len(), expected.len());
+            for index in droplet {
+                assert!(expected.contains(index));
+            }
+        }
 
-//         assert_eq!(expected_labeled, droplets.labeled);
-//     }
+        assert_eq!(expected_labeled, droplets.labeled);
+    }
 
-//     #[test]
-//     fn registers_new_droplets() {
-//         use crate::reaction::BasicReaction as BR;
-//         let mut state = arr2(&[
-//             [0, 0, 0, 0, 0],
-//             [0, 0, 0, 0, 0],
-//             [0, 0, 0, 0, 0],
-//             [0, 0, 0, 0, 0],
-//             [0, 0, 0, 0, 0],
-//         ]);
-//         let boundary = boundary_condition::Periodic;
-//         let reactions = vec![
-//             BR::point_change(0, 1, [1, 1]),
-//             BR::point_change(0, 1, [3, 3]),
-//             BR::point_change(0, 1, [1, 2]),
-//             BR::point_change(0, 1, [2, 2]),
-//             BR::point_change(0, 1, [2, 3]),
-//         ];
-//         fn is_one(x: &usize) -> bool {
-//             *x == 1
-//         }
-//         let mut droplets = Droplets::new(&state, &boundary, &is_one);
+    #[test]
+    fn registers_new_droplets() {
+        use crate::reaction::BasicReaction as BR;
+        let mut state: Array2<u32> = arr2(&[
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+        ]);
+        let boundary = boundary_condition::Periodic;
+        let reactions = vec![
+            BR::point_change(0, 1, [1, 1]),
+            BR::point_change(0, 1, [3, 3]),
+            BR::point_change(0, 1, [1, 2]),
+            BR::point_change(0, 1, [2, 2]),
+            BR::point_change(0, 1, [2, 3]),
+        ];
+        let mut droplets = Droplets::new(
+            &state.view(),
+            &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+            &vec![1],
+        );
 
-//         let expected_droplets = vec![
-//             vec![vec![[1, 1]]],
-//             vec![vec![[1, 1]], vec![[3, 3]]],
-//             vec![vec![[1, 1], [1, 2]], vec![[3, 3]]],
-//             vec![vec![[1, 1], [1, 2], [2, 2]], vec![[3, 3]]],
-//             vec![vec![[1, 1], [1, 2], [2, 2], [2, 3], [3, 3]]],
-//         ];
-//         for (reaction, expected) in reactions.iter().zip(expected_droplets) {
-//             reaction.apply(&mut state);
-//             droplets.update(&state, &boundary, &is_one, reaction);
+        let expected_droplets = vec![
+            vec![vec![[1, 1]]],
+            vec![vec![[1, 1]], vec![[3, 3]]],
+            vec![vec![[1, 1], [1, 2]], vec![[3, 3]]],
+            vec![vec![[1, 1], [1, 2], [2, 2]], vec![[3, 3]]],
+            vec![vec![[1, 1], [1, 2], [2, 2], [2, 3], [3, 3]]],
+        ];
+        for (reaction, expected) in reactions.iter().zip(expected_droplets) {
+            reaction.apply(&mut state);
+            droplets.update(
+                &state.view(),
+                &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+                &vec![1],
+                &(Box::new(*reaction) as Box<dyn Reaction<u32>>),
+            );
 
-//             assert_eq!(droplets.droplets.len(), expected.len());
-//             for (droplet, expected_droplet) in droplets.droplets.iter().zip(expected) {
-//                 assert_eq!(droplet.len(), expected_droplet.len());
-//                 for idx in droplet {
-//                     println!("{idx:?}");
-//                     assert!(expected_droplet.contains(&idx));
-//                 }
-//             }
-//         }
-//     }
+            assert_eq!(droplets.droplets.len(), expected.len());
+            for (droplet, expected_droplet) in droplets.droplets.iter().zip(expected) {
+                assert_eq!(droplet.len(), expected_droplet.len());
+                for idx in droplet {
+                    println!("{idx:?}");
+                    assert!(expected_droplet.contains(&idx));
+                }
+            }
+        }
+    }
 
-//     #[test]
-//     fn can_merge_multiple_droplets() {
-//         use crate::reaction::BasicReaction as BR;
-//         let mut state = arr2(&[
-//             [0, 1, 0, 0, 1],
-//             [1, 0, 0, 1, 0],
-//             [0, 1, 0, 0, 1],
-//             [0, 0, 0, 0, 0],
-//             [0, 0, 0, 0, 0],
-//         ]);
-//         let boundary = boundary_condition::Periodic;
-//         let reactions = vec![
-//             BR::point_change(0, 1, [1, 1]),
-//             BR::point_change(0, 1, [1, 4]),
-//         ];
-//         fn is_one(x: &usize) -> bool {
-//             *x == 1
-//         }
-//         let mut droplets = Droplets::new(&state, &boundary, &is_one);
+    #[test]
+    fn can_merge_multiple_droplets() {
+        use crate::reaction::BasicReaction as BR;
+        let mut state = arr2(&[
+            [0, 1, 0, 0, 1],
+            [1, 0, 0, 1, 0],
+            [0, 1, 0, 0, 1],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+        ]);
+        let boundary = boundary_condition::Periodic;
+        let reactions = vec![
+            BR::point_change(0, 1, [1, 1]),
+            BR::point_change(0, 1, [1, 4]),
+        ];
+        let mut droplets = Droplets::new(
+            &state.view(),
+            &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+            &vec![1],
+        );
 
-//         let expected_droplets = vec![
-//             vec![
-//                 vec![[0, 1], [1, 0], [1, 1], [2, 1]],
-//                 vec![[0, 4]],
-//                 vec![[2, 4]],
-//                 vec![[1, 3]],
-//             ],
-//             vec![vec![
-//                 [0, 1],
-//                 [1, 0],
-//                 [1, 1],
-//                 [2, 1],
-//                 [0, 4],
-//                 [1, 3],
-//                 [2, 4],
-//                 [1, 4],
-//             ]],
-//         ];
-//         for (reaction, expected) in reactions.iter().zip(expected_droplets) {
-//             reaction.apply(&mut state);
-//             droplets.update(&state, &boundary, &is_one, reaction);
+        let expected_droplets = vec![
+            vec![
+                vec![[0, 1], [1, 0], [1, 1], [2, 1]],
+                vec![[0, 4]],
+                vec![[2, 4]],
+                vec![[1, 3]],
+            ],
+            vec![vec![
+                [0, 1],
+                [1, 0],
+                [1, 1],
+                [2, 1],
+                [0, 4],
+                [1, 3],
+                [2, 4],
+                [1, 4],
+            ]],
+        ];
+        for (reaction, expected) in reactions.iter().zip(expected_droplets) {
+            reaction.apply(&mut state);
+            droplets.update(
+                &state.view(),
+                &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+                &vec![1],
+                &(Box::new(*reaction) as Box<dyn Reaction<u32>>),
+            );
 
-//             assert_eq!(droplets.droplets.len(), expected.len());
-//             for (droplet, expected_droplet) in droplets.droplets.iter().zip(expected) {
-//                 assert_eq!(droplet.len(), expected_droplet.len());
-//                 for idx in droplet {
-//                     assert!(expected_droplet.contains(&idx));
-//                 }
-//             }
-//         }
-//     }
-// }
+            assert_eq!(droplets.droplets.len(), expected.len());
+            for (droplet, expected_droplet) in droplets.droplets.iter().zip(expected) {
+                assert_eq!(droplet.len(), expected_droplet.len());
+                for idx in droplet {
+                    assert!(expected_droplet.contains(&idx));
+                }
+            }
+        }
+    }
+}

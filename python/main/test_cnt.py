@@ -84,6 +84,28 @@ def analyze(path):
             times[group] = []
             magnetic_fields[group] = magnetic_field
 
+            
+        state = initial_state.copy().astype("u4")
+        reactions = load.reactions()
+        droplets = lg.analysis.Droplets(
+            state,
+            boundary,
+            [load.BONDING],
+        )
+        t = 0
+        for reaction in reactions:
+            load.apply_reaction(state, reaction)
+            droplets.update(
+                state,
+                boundary,
+                [load.BONDING],
+                reaction,
+            )
+            t += reaction["dt"]
+            if np.max([len(drop) for drop in droplets.droplets()]) == threshold:
+                break
+        time = t
+
         time = load.final_time()
         times[group].append(time)
         load.clean_up_temp_files()

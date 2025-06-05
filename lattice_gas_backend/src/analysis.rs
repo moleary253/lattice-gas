@@ -50,50 +50,51 @@ pub fn largest_droplet_size_over_time(
     Ok(sizes)
 }
 
-// #[cfg(test)]
-// pub mod tests {
-//     use crate::boundary_condition;
+#[cfg(test)]
+pub mod tests {
+    use crate::boundary_condition;
 
-//     use super::*;
-//     use ndarray::arr2;
+    use super::*;
+    use ndarray::arr2;
 
-//     #[test]
-//     fn largest_droplet_size_over_time_works() {
-//         use crate::reaction::BasicReaction as BR;
-//         let initial_state = arr2(&[
-//             [1, 0, 0, 1, 1],
-//             [1, 1, 0, 0, 0],
-//             [0, 1, 0, 1, 1],
-//             [0, 0, 0, 0, 1],
-//             [0, 0, 0, 1, 1],
-//             [0, 0, 1, 0, 0],
-//         ]);
-//         let boundary = boundary_condition::Periodic;
-//         let reactions = vec![
-//             (1.0, BR::point_change(0, 1, [5, 1])),
-//             (1.0, BR::point_change(1, 0, [5, 2])),
-//             (1.0, BR::point_change(1, 0, [5, 1])),
-//             (1.0, BR::point_change(0, 1, [0, 2])),
-//             (1.0, BR::point_change(0, 1, [2, 0])),
-//             (1.0, BR::point_change(1, 0, [3, 4])),
-//             (1.0, BR::point_change(0, 1, [0, 1])),
-//             (1.0, BR::point_change(1, 0, [1, 1])),
-//         ];
-//         let sizes = largest_droplet_size_over_time(&initial_state, &boundary, &reactions, |site| {
-//             *site == 1
-//         });
+    // TODO(Myles): Rewrite this test in python
+    // #[test]
+    // fn largest_droplet_size_over_time_works() {
+    //     use crate::reaction::BasicReaction as BR;
+    //     let initial_state = arr2(&[
+    //         [1, 0, 0, 1, 1],
+    //         [1, 1, 0, 0, 0],
+    //         [0, 1, 0, 1, 1],
+    //         [0, 0, 0, 0, 1],
+    //         [0, 0, 0, 1, 1],
+    //         [0, 0, 1, 0, 0],
+    //     ]);
+    //     let boundary = boundary_condition::Periodic;
+    //     let reactions = vec![
+    //         (1.0, BR::point_change(0, 1, [5, 1])),
+    //         (1.0, BR::point_change(1, 0, [5, 2])),
+    //         (1.0, BR::point_change(1, 0, [5, 1])),
+    //         (1.0, BR::point_change(0, 1, [0, 2])),
+    //         (1.0, BR::point_change(0, 1, [2, 0])),
+    //         (1.0, BR::point_change(1, 0, [3, 4])),
+    //         (1.0, BR::point_change(0, 1, [0, 1])),
+    //         (1.0, BR::point_change(1, 0, [1, 1])),
+    //     ];
+    //     let sizes = largest_droplet_size_over_time(&initial_state, &boundary, &reactions, |site| {
+    //         *site == 1
+    //     });
 
-//         let expected_sizes = vec![
-//             (0.0, 6),
-//             (4.0, 7),
-//             (5.0, 13),
-//             (6.0, 10),
-//             (7.0, 11),
-//             (8.0, 10),
-//         ];
-//         assert_eq!(sizes.len(), expected_sizes.len());
-//         for (size, expected) in sizes.into_iter().zip(expected_sizes) {
-//             assert_eq!(size, expected);
-//         }
-//     }
-// }
+    //     let expected_sizes = vec![
+    //         (0.0, 6),
+    //         (4.0, 7),
+    //         (5.0, 13),
+    //         (6.0, 10),
+    //         (7.0, 11),
+    //         (8.0, 10),
+    //     ];
+    //     assert_eq!(sizes.len(), expected_sizes.len());
+    //     for (size, expected) in sizes.into_iter().zip(expected_sizes) {
+    //         assert_eq!(size, expected);
+    //     }
+    // }
+}
