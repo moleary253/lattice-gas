@@ -8,7 +8,7 @@ pub trait Reaction<T> {
     fn indicies_updated(&self) -> Vec<[usize; 2]>;
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BasicReaction<T>
 where
     T: Clone,
