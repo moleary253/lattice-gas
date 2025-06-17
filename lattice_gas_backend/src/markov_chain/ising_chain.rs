@@ -108,9 +108,9 @@ impl MarkovChain<u32, BasicReaction<u32>> for IsingChain {
                 from: EMPTY,
                 to: BONDING,
                 position,
-            } => (-self.beta
-                * (self.site_energy(state, boundary, position) / 2.0 - 2.0 * self.bond_energy)
-                + self.magnetic_field * self.beta / 2.0)
+            } => (self.beta
+                * (-self.site_energy(state, boundary, position) / 2.0 + 2.0 * self.bond_energy)
+                + self.magnetic_field * self.beta)
                 .exp(),
             BR::PointChange {
                 from: BONDING,
@@ -118,7 +118,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for IsingChain {
                 position,
             } => (self.beta
                 * (self.site_energy(state, boundary, position) / 2.0 + 2.0 * self.bond_energy)
-                - self.magnetic_field * self.beta / 2.0)
+                - self.magnetic_field * self.beta)
                 .exp(),
             _ => panic!("Unexpected reaction {:?}", reaction),
         }

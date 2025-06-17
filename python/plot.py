@@ -6,6 +6,8 @@ import random
 
 import load
 
+import lattice_gas as lg
+
 
 IMAGE_FORMAT = {"cmap": "gray", "vmin": 0, "vmax": 2}
 E_COLOR = "gray"
@@ -152,8 +154,8 @@ def fraction_time_correlation(initial_conditions, reactions, species="Bonding", 
     plt.show()
 
 
-def graph_sizes(sizes):
-    plt.step(sizes[:,0], sizes[:,1], where="post")
+def graph_sizes(times, sizes):
+    plt.step(times, sizes, where="post")
     plt.show()
 
 
@@ -205,8 +207,14 @@ if __name__ == "__main__":
 
     if args.sizes:
         print("Graphing Sizes...")
-        sizes = load.sizes(directory)
-        graph_sizes(sizes)
+        sizes = np.array(lg.analysis.largest_droplet_size_over_time(
+            initial_conditions.astype("u4"),
+            lg.boundary_condition.Periodic(),
+            reactions,
+            [load.BONDING],
+        ))
+        times = np.cumsum([0] + [reaction["dt"] for reaction in reactions])
+        graph_sizes(times, sizes)
         
     import shutil
     shutil.rmtree(load.TEMP_ARCHIVE_PATH)

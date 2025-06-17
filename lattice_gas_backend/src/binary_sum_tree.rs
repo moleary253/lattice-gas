@@ -101,7 +101,7 @@ pub mod tests {
     use super::*;
 
     #[test]
-    fn initialization_works_as_expected() {
+    fn initialization() {
         let initial_data = vec![1, 3, 10, 7, 2];
         let expected_final_data = vec![
             1, 3, 10, 7, 2, 0, // Layer 0
@@ -116,7 +116,7 @@ pub mod tests {
     }
 
     #[test]
-    fn updating_works_as_expected() {
+    fn updating() {
         let initial_data = vec![1, 3, 10, 7, 2];
         let expected_final_data = vec![1, 3, 3, 7, 2, 0, 4, 10, 2, 0, 14, 2, 16];
         let mut tree = BinarySumTree::new(initial_data);
@@ -127,7 +127,7 @@ pub mod tests {
     }
 
     #[test]
-    fn search_works_as_expected() {
+    fn search() {
         let initial_data = vec![1, 3, 10, 7, 2];
         let tree = BinarySumTree::new(initial_data);
 

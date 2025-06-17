@@ -1,35 +1,14 @@
 use super::*;
-use crate::boundary_condition::BoundaryCondition;
-use crate::reaction::Reaction;
-use ndarray::{Array1, ArrayView2};
-
-use numpy::{PyArray1, PyArray2};
-use pyo3::types::{PyDict, PyFloat};
 
 #[pyfunction]
 #[pyo3(name = "commitance")]
 pub fn py_commitance<'py>(
     py: Python<'py>,
-    state: &Bound<'py, PyArray2<u32>>,
-    boundary: &Bound<'py, PyAny>,
-    reactions: &Bound<'py, PyList>,
-    counts_as_droplet: Vec<u32>,
+    sizes: Vec<usize>,
+    delta_times: Vec<f64>,
     bottom_absorbing_size: usize,
     top_absorbing_size: usize,
 ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>)> {
-    let mut delta_times: Vec<f64> = Vec::with_capacity(reactions.len());
-    for reaction in reactions.iter() {
-        delta_times.push(
-            reaction
-                .downcast::<PyDict>()?
-                .get_item("dt")?
-                .unwrap()
-                .downcast::<PyFloat>()?
-                .extract()?,
-        );
-    }
-    let sizes = py_largest_droplet_size_over_time(state, boundary, reactions, counts_as_droplet)?;
-
     let mut time_seen = Array1::zeros(top_absorbing_size - 1 - bottom_absorbing_size);
     let mut time_succeeded = Array1::zeros(top_absorbing_size - 1 - bottom_absorbing_size);
 
@@ -48,21 +27,15 @@ pub fn py_commitance<'py>(
         );
         py.check_signals()?;
     }
-    Ok((time_succeeded.to_pyarray(py), time_succeeded.to_pyarray(py)))
+    Ok((time_succeeded.to_pyarray(py), time_seen.to_pyarray(py)))
 }
 
-pub fn commitance<T: Clone + PartialEq>(
-    state: &ArrayView2<T>,
-    boundary: &Box<dyn BoundaryCondition<T>>,
-    reactions: &Vec<Box<dyn Reaction<T>>>,
-    counts_as_droplet: &Vec<T>,
+pub fn commitance(
+    sizes: &Vec<usize>,
     delta_times: &Vec<f64>,
     bottom_absorbing_size: usize,
     top_absorbing_size: usize,
 ) -> (Array1<f64>, Array1<f64>) {
-    let sizes =
-        largest_droplet_size_over_time(state, boundary, reactions, counts_as_droplet.clone());
-
     let mut time_seen = Array1::zeros(top_absorbing_size - 1 - bottom_absorbing_size);
     let mut time_succeeded = Array1::zeros(top_absorbing_size - 1 - bottom_absorbing_size);
 
@@ -121,7 +94,9 @@ fn advance_one_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::boundary_condition::BoundaryCondition;
     use crate::reaction::BasicReaction as BR;
+    use crate::reaction::Reaction;
     use ndarray::{arr1, arr2};
 
     #[test]
@@ -182,16 +157,15 @@ mod tests {
             .collect();
 
         let times = vec![1.0; reactions.len()];
-
-        let (succeeded, seen) = commitance(
+        let sizes = largest_droplet_size_over_time(
             &initial_state.view(),
             &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
             &reactions,
-            &counts_as_droplet,
-            &times,
-            bottom_absorbing_size,
-            top_absorbing_size,
+            counts_as_droplet,
         );
+
+        let (succeeded, seen) =
+            commitance(&sizes, &times, bottom_absorbing_size, top_absorbing_size);
 
         let expected_seen = arr1(&[6.0, 7.0, 4.0, 4.0, 2.0, 1.0, 1.0, 1.0, 1.0]);
         let expected_succeeded = arr1(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);

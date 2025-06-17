@@ -1,6 +1,6 @@
 [package]
 name = "lattice_gas"
-version = "3.0.3"
+version = "3.0.4"
 edition = "2021"
 
 [lib]
@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 ndarray = { version = "0.16", features = ["serde"] }
 rand = { version = "0.9" , features = ["thread_rng", "small_rng"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = { version = "1.0" }
 flate2 = { version = "1.0" }
 tar = { version = "0.4" }

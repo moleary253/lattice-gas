@@ -1,6 +1,6 @@
 use numpy::ndarray::Array2;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyFloat, PyList};
 use serde::{Deserialize, Serialize};
 
 pub trait Reaction<T> {
@@ -8,18 +8,23 @@ pub trait Reaction<T> {
     fn indicies_updated(&self) -> Vec<[usize; 2]>;
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, IntoPyObject, FromPyObject)]
 pub enum BasicReaction<T>
 where
     T: Clone,
 {
     Diffusion {
+        #[pyo3(item)]
         from: [usize; 2],
+        #[pyo3(item)]
         to: [usize; 2],
     },
     PointChange {
+        #[pyo3(item)]
         from: T,
+        #[pyo3(item)]
         to: T,
+        #[pyo3(item)]
         position: [usize; 2],
     },
 }
@@ -65,49 +70,6 @@ impl<T: Clone> Reaction<T> for BasicReaction<T> {
     }
 }
 
-impl FromPyObject<'_> for BasicReaction<u32> {
-    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
-        if let Ok(dict) = ob.downcast::<PyDict>() {
-            match dict
-                .get_item("type")?
-                .map(|value| value.extract::<String>())
-                .transpose()?
-                .as_ref()
-                .map(|value| value.as_str())
-            {
-                Some("Diffusion") => {
-                    return Ok(Self::diffusion(
-                        dict.get_item("from")?
-                            .expect("Diffusion reaction should have 'from' key")
-                            .extract()?,
-                        dict.get_item("to")?
-                            .expect("Diffusion reaction should have 'to' key")
-                            .extract()?,
-                    ));
-                }
-                Some("PointChange") => {
-                    return Ok(Self::point_change(
-                        dict.get_item("from")?
-                            .expect("PointChange reaction should have 'from' key.")
-                            .extract()?,
-                        dict.get_item("to")?
-                            .expect("PointChange reaction should have 'to' key.")
-                            .extract()?,
-                        dict.get_item("position")?
-                            .expect("PointChange reaction should have 'position' key.")
-                            .extract()?,
-                    ));
-                }
-                _ => {}
-            }
-        }
-        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
-            "{} is not a BasicReaction.",
-            ob
-        )))
-    }
-}
-
 pub fn extract(py_reaction: &Bound<'_, PyAny>) -> PyResult<Box<dyn Reaction<u32>>> {
     if let Ok(reaction) = py_reaction.extract::<BasicReaction<u32>>() {
         return Ok(Box::new(reaction));
@@ -116,4 +78,19 @@ pub fn extract(py_reaction: &Bound<'_, PyAny>) -> PyResult<Box<dyn Reaction<u32>
         "{} is not a reaction.",
         py_reaction
     )))
+}
+
+pub fn extract_times(reactions: &Bound<'_, PyList>) -> PyResult<Vec<f64>> {
+    let mut delta_times: Vec<f64> = Vec::with_capacity(reactions.len());
+    for reaction in reactions.iter() {
+        delta_times.push(
+            reaction
+                .downcast::<PyDict>()?
+                .get_item("dt")?
+                .unwrap()
+                .downcast::<PyFloat>()?
+                .extract()?,
+        );
+    }
+    Ok(delta_times)
 }

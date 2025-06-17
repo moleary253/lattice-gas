@@ -1,4 +1,3 @@
-use super::*;
 use pyo3::prelude::*;
 
 #[pymodule]
@@ -9,6 +8,8 @@ fn lattice_gas(m: &Bound<'_, PyModule>) -> PyResult<()> {
         py_largest_droplet_size_over_time,
         &analysis
     )?)?;
+    analysis.add_function(wrap_pyfunction!(py_commitance, &analysis)?)?;
+    analysis.add_function(wrap_pyfunction!(py_cnt_rates, &analysis)?)?;
     analysis.add_class::<Droplets>()?;
     m.add_submodule(&analysis)?;
 
@@ -37,6 +38,12 @@ fn lattice_gas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     use crate::simulate::*;
     simulate.add_function(wrap_pyfunction!(py_simulate, &simulate)?)?;
     m.add_submodule(&simulate)?;
+
+    let load = PyModule::new(m.py(), "load")?;
+    use crate::serialize::*;
+    load.add_function(wrap_pyfunction!(delta_times_and_reactions, &load)?)?;
+    load.add_function(wrap_pyfunction!(initial_conditions, &load)?)?;
+    m.add_submodule(&load)?;
 
     Ok(())
 }
