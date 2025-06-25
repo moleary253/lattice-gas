@@ -29,16 +29,15 @@ def run_simulation(output_file, random_seed, magnetic_field, bond_energy, initia
         ending_criteria,
         random_seed,
         output_file,
-        save_reactions=True,
     )
 
 
 def run():
     import shutil
 
-    num_trials = 20
-    bond_energy = -3.0
-    magnetic_fields = [2.5, 3]
+    num_trials = 100
+    bond_energy = -1.5
+    magnetic_fields = [1.20, 1.25, 1.5, 1.75]
     
     if os.path.exists(DEFAULT_DIR):
         shutil.rmtree(DEFAULT_DIR)
@@ -46,7 +45,7 @@ def run():
     for i in tqdm(range(num_trials)):
         for magnetic_field in magnetic_fields:
             random_seed = 17 + i * 31 + int(magnetic_field * 1e5) % 11
-            output_file = DEFAULT_DIR + f"/{magnetic_field:.5f}_{i+1}.tar.gz"
+            output_file = DEFAULT_DIR + f"/{magnetic_field:.5f}_{i+1}"
             initial_state = np.zeros((100, 100), dtype=np.dtype("u4"))
 
             ending_criterion = lg.ending_criterion.LargestDropletSize(
@@ -66,12 +65,18 @@ def run():
             )
 
 
+def forward_rate(size, bond_energy, field=0):
+    return np.exp(
+        field + 5 * bond_energy
+    ) * (2 * np.sqrt(np.pi * size) - 2 * np.sqrt(np.pi))
+
+
 def analyze(path):
     from scipy.stats import gaussian_kde
 
     boundary = lg.boundary_condition.Periodic()
 
-    bond_energy = -3
+    bond_energy = -1.5
 
     times = {}
     magnetic_fields = {}
@@ -85,7 +90,6 @@ def analyze(path):
     monomer_concentrations = {}
     for sim_name in tqdm(os.listdir(path)):
         sim_path = os.path.join(path, sim_name)
-        directory = load.unpack_natural_input(sim_path)
 
         magnetic_field = float(sim_name.split("_")[0])
         group = f"$h={magnetic_field:.5f}$"
@@ -99,10 +103,11 @@ def analyze(path):
             num_fwd[group] = np.zeros(top_absorb_size)
             num_bkwd[group] = np.zeros(top_absorb_size)
             
-        initial_state = load.initial_conditions()
-        final_time = load.final_time()
+        initial_state = lg.load.initial_conditions(sim_path)
+        final_time = lg.load.final_time(sim_path)
         state = initial_state.copy().astype("u4")
-        reactions = load.reactions()
+        reactions = lg.load.reactions(sim_path)
+        dts = lg.load.delta_times(sim_path)
         droplets = lg.analysis.Droplets(
             state,
             boundary,
@@ -110,7 +115,17 @@ def analyze(path):
         )
         t = 0
         weighted_sum = 0
-        for reaction in reactions:
+        for i, reaction in enumerate(reactions):
+            if t < final_time / 2:
+                t += dts[i]
+                weighted_sum += dts[i] * len(list(
+                    filter(
+                        lambda droplet: len(droplet) == 1,
+                        droplets.droplets()
+                    )
+                ))
+            else:
+                break
             load.apply_reaction(state, reaction)
             droplets.update(
                 state,
@@ -118,14 +133,6 @@ def analyze(path):
                 [load.BONDING],
                 reaction,
             )
-            if t < final_time / 2:
-                t += reaction["dt"]
-                weighted_sum += reaction["dt"] * len(list(
-                    filter(
-                        lambda droplet: len(droplet) == 1,
-                        droplets.droplets()
-                    )
-                ))
         monomer_concentrations[group] += np.array([weighted_sum, t])
 
         state = initial_state.copy().astype("u4")
@@ -135,7 +142,6 @@ def analyze(path):
             reactions,
             [load.BONDING],
         )
-        dts = [reaction["dt"] for reaction in reactions]
         t_succeeded, t_seen = lg.analysis.commitance(
             sizes,
             dts,
@@ -149,13 +155,11 @@ def analyze(path):
             sizes,
             dts,
         )
-        time_seen_rates[group] += t_seen_rates
-        num_fwd[group] += n_fwd
-        num_bkwd[group] += n_bkwd
+        time_seen_rates[group] += t_seen_rates[:time_seen_rates[group].size]
+        num_fwd[group] += n_fwd[:num_fwd[group].size]
+        num_bkwd[group] += n_bkwd[:num_bkwd[group].size]
 
         times[group].append(final_time)
-
-        load.clean_up_temp_files()
 
     for group in monomer_concentrations:
         monomer_concentrations[group] = (
@@ -172,6 +176,20 @@ def analyze(path):
     sample_times = np.linspace(np.min(bins), np.max(bins), 300)
 
     pdfs = [gaussian_kde(times[group]) for group in times]
+    cnt_pdfs = {}
+    crit_sizes = {}
+    for group in times:
+        pdf, crit_size = cnt_predicted_pdf(
+            np.average(times[group]) * sample_times,
+            beta=1.0,
+            bond_energy=bond_energy,
+            magnetic_field=magnetic_fields[group],
+            area=100*100,
+            stopping_size=100,
+            match_mean=np.average(times[group]),
+        )
+        cnt_pdfs[group] = pdf
+        crit_sizes[group] = crit_size
 
     for i, group in enumerate(times):
         print(f"{group}: sigma = {np.std(times[group]):.2f}")
@@ -196,15 +214,7 @@ def analyze(path):
         )
         ax1s[i].plot(
             np.average(times[group]) * sample_times,
-            cnt_predicted_pdf(
-                np.average(times[group]) * sample_times,
-                beta=1.0,
-                bond_energy=bond_energy,
-                magnetic_field=magnetic_fields[group],
-                area=100*100,
-                stopping_size=100,
-                match_mean=np.average(times[group]),
-            ),
+            cnt_pdfs[group],
             "--",
             color=color,
         )
@@ -214,11 +224,16 @@ def analyze(path):
         ax1s[i].set(xlabel="$t$", ylabel="Density")
 
     fig2, ax2 = plt.subplots()
-    for group in time_succeeded:
+    for i, group in enumerate(time_succeeded):
         ax2.plot(
             np.arange(bot_absorb_size + 1, top_absorb_size),
             time_succeeded[group] / time_seen[group],
-            "b-",
+            f"C{i}-",
+        )
+        ax2.plot(
+            [crit_sizes[group], crit_sizes[group]],
+            [0, 1],
+            f"C{i}--",
         )
     ax2.plot(
         [bot_absorb_size + 1, top_absorb_size],
@@ -235,29 +250,18 @@ def analyze(path):
             0.5
         )
         xs = np.arange(0, len(num_fwd[group]))
+        particle_circumference = 2 * np.sqrt(np.pi)
         ax3s[i].plot(
-            xs,
-            num_fwd[group] / time_seen_rates[group][:-1],
+            xs[1:],
+            num_fwd[group][1:] / time_seen_rates[group][1:-1],
             ".",
             label=group + " $k_f$",
             color=color
         )
-        # ax3s[i].plot(
-        #     xs[1:],
-        #     num_bkwd[group][:-1] / time_seen_rates[group][1:-1],
-        #     marker="^",
-        #     label=group + " $k_b$",
-        #     color=color
-        # )
-        def forward_rate(size, field=0):
-            particle_circumference = 2 * np.sqrt(np.pi)
-            return np.exp(field) * np.exp(
-                2 * bond_energy / 2
-            ) * particle_circumference * np.sqrt(size)
 
         ax3s[i].plot(
             xs,
-            forward_rate(xs, field=magnetic_fields[group] / 2),
+            forward_rate(xs, bond_energy, field=magnetic_fields[group]),
             "--",
             label=group + " $k_f$",
             color=color
@@ -280,12 +284,6 @@ def cnt_predicted_pdf(
     match_mean=None,
 ):
     assert bond_energy < 0
-
-    # NOTE(Myles): This should be here as far as I can tell, but I can't find
-    #              the factor of 2 in my math, so I am leaving this out for now
-    #              to debug the CNT rate part of this function.
-    magnetic_field /= 2
-    bond_energy /= 2
 
     print(f"\tbond_energy = {bond_energy}")
     print(f"\tmagnetic_field = {magnetic_field}")
@@ -322,11 +320,6 @@ def cnt_predicted_pdf(
     monomer_concentration = 1 / (1 + np.exp(-2 * magnetic_field * beta - 8 * beta * bond_energy))
     print(f"\tmonomer conc = {monomer_concentration}")
 
-    def forward_rate(size, field=0):
-        return np.exp(field * beta) * np.exp(
-            2 * beta * bond_energy
-        ) * particle_circumference * np.sqrt(size)
-
     def cnt_rate_exponent(size):
         return np.exp(
             (1 - np.sqrt(size)) * particle_circumference * beta_surface_tension
@@ -334,15 +327,22 @@ def cnt_predicted_pdf(
             - tau * np.log(size)
             + 2 * size * beta * magnetic_field
         )
-    print(f"\tln(-beta g(i*))\t= {np.log(cnt_rate_exponent(critical_size)):.1f}")
+    print(f"\t-beta g(i*)\t= {np.log(cnt_rate_exponent(critical_size)):.1f}")
 
-    prefactor = monomer_concentration * area * forward_rate(
-        critical_size
-    ) * np.sqrt((
-        dimensionless_tension * np.power(critical_size, -3/2)
-        + tau / (critical_size**2)
-    ) / 2 / np.pi)
+    prefactor = (1
+        # * monomer_concentration
+        * area
+        * forward_rate(
+            critical_size, bond_energy, field=magnetic_field,
+        )
+        * np.sqrt((
+            dimensionless_tension * np.power(critical_size, -3/2)
+            + tau / (critical_size**2)
+        ) / 2 / np.pi)
+    )
+    print(f"\tcnt_prefactor\t= {prefactor:.5f}")
     print(f"\tln(cnt_prefactor)\t= {np.log(prefactor):.5f}")
+    print(f"\tln(cnt_prefactor/monomer_concentration)\t= {np.log(prefactor/monomer_concentration):.5f}")
 
     cnt_rate = prefactor * cnt_rate_exponent(critical_size)
     print(f"\t1/cnt_rate\t= {1/cnt_rate:.1f}")
@@ -355,13 +355,13 @@ def cnt_predicted_pdf(
         )
 
     def drift(size):
-        return forward_rate(size, magnetic_field) * (
+        return forward_rate(size, bond_energy, magnetic_field) * (
             - beta_driving_force(size)
             + 1 / 2 / size
         )
 
     def diffusion(size):
-        return forward_rate(size, magnetic_field)
+        return forward_rate(size, bond_energy, magnetic_field)
 
     delta_size = stopping_size - critical_size
 
@@ -419,7 +419,7 @@ def cnt_predicted_pdf(
             scale=np.sqrt(1/cnt_rate**2 + 2 * diffusion(size)/drift(size)**3 * delta_size),
         )
 
-    return p(ts)
+    return p(ts), critical_size
 
 
 if __name__ == "__main__":

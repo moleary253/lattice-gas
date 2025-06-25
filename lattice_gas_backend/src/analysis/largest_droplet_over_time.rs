@@ -22,7 +22,7 @@ pub fn py_largest_droplet_size_over_time(
     counts_as_droplet: Vec<u32>,
 ) -> PyResult<Vec<usize>> {
     let mut state = initial_state.to_owned_array();
-    let boundary = crate::boundary_condition::extract(boundary)?;
+    let boundary = boundary.extract()?;
     let (mut droplets, mut sizes) = initialize(&state.view(), &boundary, &counts_as_droplet);
     for reaction in reactions {
         let reaction = crate::reaction::extract(&reaction)?;
@@ -48,11 +48,11 @@ pub fn py_largest_droplet_size_over_time(
 ///    that can form a droplet.
 ///
 /// Returns sizes, where each entry is the largest size at that sim step.
-pub fn largest_droplet_size_over_time<T: Clone + PartialEq>(
-    initial_state: &ArrayView2<T>,
-    boundary: &Box<dyn BoundaryCondition<T>>,
-    reactions: &Vec<Box<dyn Reaction<T>>>,
-    counts_as_droplet: Vec<T>,
+pub fn largest_droplet_size_over_time(
+    initial_state: &ArrayView2<u32>,
+    boundary: &Box<dyn BoundaryCondition>,
+    reactions: &Vec<Box<dyn Reaction<u32>>>,
+    counts_as_droplet: Vec<u32>,
 ) -> Vec<usize> {
     let mut state = initial_state.to_owned();
     let (mut droplets, mut sizes) = initialize(&state.view(), &boundary, &counts_as_droplet);
@@ -69,10 +69,10 @@ pub fn largest_droplet_size_over_time<T: Clone + PartialEq>(
     sizes
 }
 
-fn initialize<T: Clone + PartialEq>(
-    state: &ArrayView2<T>,
-    boundary: &Box<dyn BoundaryCondition<T>>,
-    counts_as_droplet: &Vec<T>,
+fn initialize(
+    state: &ArrayView2<u32>,
+    boundary: &Box<dyn BoundaryCondition>,
+    counts_as_droplet: &Vec<u32>,
 ) -> (Droplets, Vec<usize>) {
     let mut sizes = Vec::new();
     let droplets = Droplets::new(&state.view(), &boundary, &counts_as_droplet);
@@ -85,13 +85,13 @@ fn initialize<T: Clone + PartialEq>(
     (droplets, sizes)
 }
 
-fn advance_one_step<T: Clone + PartialEq>(
-    state: &mut Array2<T>,
-    boundary: &Box<dyn BoundaryCondition<T>>,
+fn advance_one_step(
+    state: &mut Array2<u32>,
+    boundary: &Box<dyn BoundaryCondition>,
     droplets: &mut Droplets,
     sizes: &mut Vec<usize>,
-    counts_as_droplet: &Vec<T>,
-    reaction: &Box<dyn Reaction<T>>,
+    counts_as_droplet: &Vec<u32>,
+    reaction: &Box<dyn Reaction<u32>>,
 ) {
     reaction.apply(state);
     droplets.update(&state.view(), &boundary, &counts_as_droplet, reaction);
@@ -133,7 +133,7 @@ mod tests {
         ];
         let sizes = largest_droplet_size_over_time(
             &initial_state.view(),
-            &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+            &(Box::new(boundary) as Box<dyn BoundaryCondition>),
             &reactions
                 .iter()
                 .map(|reaction| Box::new(*reaction) as Box<dyn Reaction<u32>>)

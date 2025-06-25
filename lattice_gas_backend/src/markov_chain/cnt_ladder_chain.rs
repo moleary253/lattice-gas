@@ -67,18 +67,14 @@ impl CNTLadderChain {
     }
 }
 
-impl MarkovChain<u32, BasicReaction<u32>> for CNTLadderChain {
-    fn initialize(
-        &mut self,
-        _state: &ArrayView2<u32>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
-    ) {
-    }
+#[typetag::serde]
+impl MarkovChain for CNTLadderChain {
+    fn initialize(&mut self, _state: &ArrayView2<u32>, _boundary: &Box<dyn BoundaryCondition>) {}
 
     fn on_reaction(
         &mut self,
         _state: &ArrayView2<u32>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _boundary: &Box<dyn BoundaryCondition>,
         _reaction_id: usize,
         _dt: f64,
     ) {
@@ -91,7 +87,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for CNTLadderChain {
     fn reaction(
         &self,
         state: &ArrayView2<u32>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _boundary: &Box<dyn BoundaryCondition>,
         mut reaction_id: usize,
     ) -> BasicReaction<u32> {
         let length = state.shape()[1];
@@ -118,7 +114,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for CNTLadderChain {
     fn rate(
         &self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         reaction_id: usize,
     ) -> f64 {
         use BasicReaction as BR;
@@ -151,7 +147,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for CNTLadderChain {
     fn indicies_affecting_reaction(
         &mut self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         reaction_id: usize,
     ) -> Vec<[usize; 2]> {
         let reaction = self.reaction(state, boundary, reaction_id);

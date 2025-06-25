@@ -39,7 +39,7 @@ impl HomogenousNVTChain {
     pub fn site_energy(
         &self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         position: [usize; 2],
     ) -> f64 {
         let mut energy = 0.;
@@ -63,8 +63,9 @@ impl HomogenousNVTChain {
     }
 }
 
-impl MarkovChain<u32, BasicReaction<u32>> for HomogenousNVTChain {
-    fn initialize(&mut self, state: &ArrayView2<u32>, boundary: &Box<dyn BoundaryCondition<u32>>) {
+#[typetag::serde]
+impl MarkovChain for HomogenousNVTChain {
+    fn initialize(&mut self, state: &ArrayView2<u32>, boundary: &Box<dyn BoundaryCondition>) {
         let mut sum_num_adjacent = Vec::with_capacity(state.len());
         for i in 0..state.shape()[0] {
             for j in 0..state.shape()[1] {
@@ -84,7 +85,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for HomogenousNVTChain {
     fn on_reaction(
         &mut self,
         _state: &ArrayView2<u32>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _boundary: &Box<dyn BoundaryCondition>,
         _reaction_id: usize,
         _dt: f64,
     ) {
@@ -103,7 +104,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for HomogenousNVTChain {
     fn reaction(
         &self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         reaction_id: usize,
     ) -> BasicReaction<u32> {
         if reaction_id < state.len() * 2 {
@@ -153,7 +154,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for HomogenousNVTChain {
     fn rate(
         &self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         reaction_id: usize,
     ) -> f64 {
         use BasicReaction as BR;
@@ -192,7 +193,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for HomogenousNVTChain {
     fn indicies_affecting_reaction(
         &mut self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         reaction_id: usize,
     ) -> Vec<[usize; 2]> {
         let reaction = self.reaction(state, boundary, reaction_id);

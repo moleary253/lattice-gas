@@ -21,7 +21,8 @@ impl TargetState {
     }
 }
 
-impl<R: Reaction<u32>> EndingCriterion<u32, R> for TargetState {
+#[typetag::serde]
+impl EndingCriterion for TargetState {
     fn should_end(&self) -> bool {
         self.is_done
     }
@@ -29,8 +30,8 @@ impl<R: Reaction<u32>> EndingCriterion<u32, R> for TargetState {
     fn initialize(
         &mut self,
         _system: &ArrayView2<u32>,
-        _chain: &Box<dyn MarkovChain<u32, R>>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _chain: &Box<dyn MarkovChain>,
+        _boundary: &Box<dyn BoundaryCondition>,
     ) {
         self.is_done = false;
     }
@@ -38,10 +39,10 @@ impl<R: Reaction<u32>> EndingCriterion<u32, R> for TargetState {
     fn update(
         &mut self,
         state: &ArrayView2<u32>,
-        _chain: &Box<dyn MarkovChain<u32, R>>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _chain: &Box<dyn MarkovChain>,
+        _boundary: &Box<dyn BoundaryCondition>,
         _delta_t: f64,
-        _reaction: R,
+        _reaction: BasicReaction<u32>,
     ) {
         self.is_done = state == self.state;
     }

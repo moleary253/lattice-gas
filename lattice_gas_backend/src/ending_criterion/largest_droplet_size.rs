@@ -21,7 +21,8 @@ impl LargestDropletSize {
     }
 }
 
-impl<R: Reaction<u32> + 'static> EndingCriterion<u32, R> for LargestDropletSize {
+#[typetag::serde]
+impl EndingCriterion for LargestDropletSize {
     fn should_end(&self) -> bool {
         self.droplets
             .as_ref()
@@ -35,8 +36,8 @@ impl<R: Reaction<u32> + 'static> EndingCriterion<u32, R> for LargestDropletSize 
     fn initialize(
         &mut self,
         state: &ArrayView2<u32>,
-        _chain: &Box<dyn MarkovChain<u32, R>>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        _chain: &Box<dyn MarkovChain>,
+        boundary: &Box<dyn BoundaryCondition>,
     ) {
         self.droplets = Some(Droplets::new(
             &state.view(),
@@ -48,10 +49,10 @@ impl<R: Reaction<u32> + 'static> EndingCriterion<u32, R> for LargestDropletSize 
     fn update(
         &mut self,
         state: &ArrayView2<u32>,
-        _chain: &Box<dyn MarkovChain<u32, R>>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        _chain: &Box<dyn MarkovChain>,
+        boundary: &Box<dyn BoundaryCondition>,
         _delta_t: f64,
-        reaction: R,
+        reaction: BasicReaction<u32>,
     ) {
         let reaction: Box<dyn Reaction<u32>> = Box::new(reaction);
         self.droplets

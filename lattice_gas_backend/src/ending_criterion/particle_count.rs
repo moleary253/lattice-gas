@@ -47,7 +47,8 @@ impl ParticleCount {
     }
 }
 
-impl EndingCriterion<u32, BasicReaction<u32>> for ParticleCount {
+#[typetag::serde]
+impl EndingCriterion for ParticleCount {
     fn should_end(&self) -> bool {
         self.mode.compare(self.threshold, self.count)
     }
@@ -55,8 +56,8 @@ impl EndingCriterion<u32, BasicReaction<u32>> for ParticleCount {
     fn initialize(
         &mut self,
         system: &ArrayView2<u32>,
-        _chain: &Box<dyn MarkovChain<u32, BasicReaction<u32>>>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _chain: &Box<dyn MarkovChain>,
+        _boundary: &Box<dyn BoundaryCondition>,
     ) {
         self.count = 0;
         for site in system {
@@ -69,8 +70,8 @@ impl EndingCriterion<u32, BasicReaction<u32>> for ParticleCount {
     fn update(
         &mut self,
         _system: &ArrayView2<u32>,
-        _chain: &Box<dyn MarkovChain<u32, BasicReaction<u32>>>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _chain: &Box<dyn MarkovChain>,
+        _boundary: &Box<dyn BoundaryCondition>,
         _delta_t: f64,
         reaction: BasicReaction<u32>,
     ) {

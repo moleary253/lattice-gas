@@ -22,27 +22,28 @@ impl ReactionCount {
     }
 }
 
-impl<T: Clone, R: Reaction<T>> EndingCriterion<T, R> for ReactionCount {
+#[typetag::serde]
+impl EndingCriterion for ReactionCount {
     fn should_end(&self) -> bool {
         self.count >= self.threshold
     }
 
     fn initialize(
         &mut self,
-        _system: &ArrayView2<T>,
-        _chain: &Box<dyn MarkovChain<T, R>>,
-        _boundary: &Box<dyn BoundaryCondition<T>>,
+        _system: &ArrayView2<u32>,
+        _chain: &Box<dyn MarkovChain>,
+        _boundary: &Box<dyn BoundaryCondition>,
     ) {
         self.count = 0;
     }
 
     fn update(
         &mut self,
-        _system: &ArrayView2<T>,
-        _chain: &Box<dyn MarkovChain<T, R>>,
-        _boundary: &Box<dyn BoundaryCondition<T>>,
+        _system: &ArrayView2<u32>,
+        _chain: &Box<dyn MarkovChain>,
+        _boundary: &Box<dyn BoundaryCondition>,
         _delta_t: f64,
-        _reaction: R,
+        _reaction: BasicReaction<u32>,
     ) {
         self.count += 1;
     }

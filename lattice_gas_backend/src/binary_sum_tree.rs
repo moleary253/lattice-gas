@@ -64,6 +64,30 @@ impl<T: Add<T, Output = T> + Default + Clone + Copy + std::cmp::PartialOrd> Bina
         }
     }
 
+    /// Updates multiple values at the given indicies and propogates that update
+    /// through the tree.
+    pub fn batch_update(&mut self, indicies: &[usize], new_values: &[T]) {
+        for (&index, &new_value) in indicies.iter().zip(new_values.iter()) {
+            self.data[index] = new_value;
+        }
+        let mut indicies_in_layer = Vec::from_iter(indicies.iter().map(|idx| idx >> 1));
+        let mut next_indicies_in_layer = Vec::with_capacity(indicies_in_layer.len());
+        for layer in 1..self.layer_sizes.len() {
+            for &index_in_layer in indicies_in_layer.iter() {
+                self.data[self.layer_boundaries[layer] + index_in_layer] = self
+                    .get(layer - 1, index_in_layer * 2)
+                    + self.get(layer - 1, index_in_layer * 2 + 1);
+                let next_index_in_layer = index_in_layer >> 1;
+                if !next_indicies_in_layer.contains(&next_index_in_layer) {
+                    next_indicies_in_layer.push(next_index_in_layer);
+                }
+            }
+            indicies_in_layer.clear();
+            (indicies_in_layer, next_indicies_in_layer) =
+                (next_indicies_in_layer, indicies_in_layer);
+        }
+    }
+
     fn get(&self, layer: usize, index_in_layer: usize) -> T {
         self.data[self.layer_boundaries[layer] + index_in_layer]
     }
@@ -124,6 +148,15 @@ pub mod tests {
         for (expected, actual) in expected_final_data.iter().zip(tree.data.iter()) {
             assert_eq!(expected, actual);
         }
+    }
+
+    #[test]
+    fn batch_updating() {
+        let initial_data = vec![1, 3, 10, 7, 2];
+        let expected_final_data = vec![1, 3, 3, -1, 5, 0, 4, 2, 5, 0, 6, 5, 11];
+        let mut tree = BinarySumTree::new(initial_data);
+        tree.batch_update(&[2, 3, 4], &[3, -1, 5]);
+        assert_eq!(expected_final_data, tree.data);
     }
 
     #[test]

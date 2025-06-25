@@ -33,7 +33,6 @@ def run_coex_simulation(output_file, random_seed, bonding_fugacity):
         [gas_ending_criterion, solid_ending_criterion],
         random_seed,
         output_file,
-        save_reactions=True,
     )
 
 
@@ -49,14 +48,12 @@ if __name__ == "__main__":
         num_gas = 0
         for i in tqdm(range(num_trials)):
             random_seed = i + 57413
-            output_file = f"data/coexistence/{bonding_fugacity:.5f}_{i+1}.tar.gz"
+            output_file = f"data/coexistence/{bonding_fugacity:.5f}_{i+1}"
             run_coex_simulation(output_file, random_seed, bonding_fugacity)
 
-            directory = load.unpack_natural_input(output_file)
-            final_conditions = load.final_state(directory)
+            final_conditions = lg.load.final_state(output_file)
             if (np.sum(final_conditions == load.BONDING) / final_conditions.size) < 0.5:
                 num_gas += 1
-            shutil.rmtree(load.TEMP_ARCHIVE_PATH)
             
         print(f"{num_gas} / {num_trials} ended as gas.")
         if abs(num_gas - num_trials // 2) < 0.5 * np.sqrt(num_trials):

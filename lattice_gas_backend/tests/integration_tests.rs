@@ -35,7 +35,7 @@ fn droplet_analysis_consistent_over_time() {
     println!("Random seed: {}", seed);
     let rng = StdRng::seed_from_u64(seed);
 
-    let (final_state, reactions) = simulate(
+    let (final_state, _delta_times, reactions) = simulate(
         state.clone(),
         Box::new(boundary),
         Box::new(chain),
@@ -48,14 +48,14 @@ fn droplet_analysis_consistent_over_time() {
     let mut state = state;
     let mut droplets = analysis::Droplets::new(
         &state.view(),
-        &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+        &(Box::new(boundary) as Box<dyn BoundaryCondition>),
         &is_droplet,
     );
-    for (_dt, reaction) in reactions {
+    for reaction in reactions {
         reaction.apply(&mut state);
         droplets.update(
             &state.view(),
-            &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+            &(Box::new(boundary) as Box<dyn BoundaryCondition>),
             &is_droplet,
             &(Box::new(reaction) as Box<dyn Reaction<u32>>),
         );
@@ -67,7 +67,7 @@ fn droplet_analysis_consistent_over_time() {
 
     let expected_droplets = analysis::Droplets::new(
         &final_state.view(),
-        &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+        &(Box::new(boundary) as Box<dyn BoundaryCondition>),
         &is_droplet,
     );
 

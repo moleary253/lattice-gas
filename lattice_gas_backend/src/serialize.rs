@@ -1,81 +1,138 @@
-use flate2::read::GzDecoder;
 use ndarray::Array2;
 use serde::{de::DeserializeOwned, Serialize};
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use tar::{Archive, Builder, Header};
+
+use crate::{
+    boundary_condition::BoundaryCondition, ending_criterion::EndingCriterion,
+    markov_chain::MarkovChain, reaction::BasicReaction,
+};
 
 use numpy::prelude::*;
-use numpy::PyArray2;
+use numpy::{PyArray1, PyArray2};
 use pyo3::exceptions::PyIOError;
 use pyo3::prelude::*;
 
-pub const TEMP_DIR: &str = "data/current";
-pub const CHAIN_FILE: &str = "chain.json";
-pub const INITIAL_CONDITIONS_FILE: &str = "initial_conditions.json";
-pub const REACTIONS_FILE: &str = "reactions.json";
-pub const FINAL_STATE_FILE: &str = "final_state.json";
-pub const FINAL_TIME_FILE: &str = "final_time.json";
+pub const CHAIN_FILE: &str = "chain.msgpack";
+pub const BOUNDARY_FILE: &str = "boundary.msgpack";
+pub const ENDING_CRITERIA_FILE: &str = "ending_criteria.msgpack";
+pub const INITIAL_CONDITIONS_FILE: &str = "initial_conditions.msgpack";
+pub const REACTIONS_FILE: &str = "reactions.msgpack";
+pub const DELTA_TIMES_FILE: &str = "delta_times.msgpack";
+pub const FINAL_STATE_FILE: &str = "final_state.msgpack";
+pub const FINAL_TIME_FILE: &str = "final_time.msgpack";
 
-pub fn serialize_object<W: Write>(
-    path: String,
-    data: &impl Serialize,
-    archive: &mut Builder<W>,
+pub fn save_simulation(
+    directory: &str,
+    chain: &Box<dyn MarkovChain>,
+    boundary: &Box<dyn BoundaryCondition>,
+    ending_criteria: &Vec<Box<dyn EndingCriterion>>,
+    initial_conditions: &Array2<u32>,
+    reactions: &Vec<BasicReaction<u32>>,
+    delta_times: &Vec<f64>,
+    final_state: &Array2<u32>,
 ) -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let data = serde_json::to_string(data)?.into_bytes();
-
-    let mut header = Header::new_gnu();
-    header.set_path(path)?;
-    header.set_size(data.len() as u64);
-    header.set_mode(0o664);
-    header.set_cksum();
-
-    archive.append(&header, &data as &[u8])?;
+    let directory = Path::new(directory);
+    fs::create_dir(directory)?;
+    serialize_object(directory.join(CHAIN_FILE), chain)?;
+    serialize_object(directory.join(BOUNDARY_FILE), boundary)?;
+    serialize_object(directory.join(ENDING_CRITERIA_FILE), ending_criteria)?;
+    serialize_object(directory.join(INITIAL_CONDITIONS_FILE), initial_conditions)?;
+    serialize_object(directory.join(REACTIONS_FILE), reactions)?;
+    serialize_object(directory.join(DELTA_TIMES_FILE), delta_times)?;
+    serialize_object(directory.join(FINAL_STATE_FILE), final_state)?;
+    serialize_object(
+        directory.join(FINAL_TIME_FILE),
+        &delta_times.iter().map(std::convert::identity).sum::<f64>(),
+    )?;
     Ok(())
 }
 
-pub fn unpack_archive(path: String) -> Result<(), Box<dyn std::error::Error + 'static>> {
-    let file = fs::File::open(path)?;
-    let unzipper = GzDecoder::new(file);
-    let mut archive = Archive::new(unzipper);
+pub fn serialize_object(
+    path: impl Into<OsString>,
+    data: &impl Serialize,
+) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    let data = rmp_serde::to_vec(data)?;
 
-    archive.unpack(TEMP_DIR)?;
-    Ok(())
-}
-
-pub fn clean_up() -> Result<(), Box<dyn std::error::Error + 'static>> {
-    fs::remove_dir_all(TEMP_DIR)?;
+    let mut file = fs::File::create(path.into())?;
+    file.write(&data)?;
     Ok(())
 }
 
 fn read<'a, T: DeserializeOwned>(
+    directory: &Path,
     extension: &'static str,
 ) -> Result<T, Box<dyn std::error::Error + 'static>> {
-    let file = fs::File::open(Path::new(TEMP_DIR).join(extension))?;
-    let data = serde_json::from_reader(file)?;
+    let file = fs::File::open(directory.join(extension))?;
+    let data = rmp_serde::from_read(file)?;
     Ok(data)
 }
 
-fn py_read<'a, T: DeserializeOwned>(extension: &'static str) -> PyResult<T> {
-    match read::<T>(extension) {
+fn py_read<'a, T: DeserializeOwned>(directory: &str, extension: &'static str) -> PyResult<T> {
+    match read::<T>(Path::new(directory), extension) {
         Ok(data) => Ok(data),
         Err(err) => Err(PyIOError::new_err(err.to_string())),
     }
 }
 
 #[pyfunction]
-pub fn delta_times_and_reactions() -> PyResult<(Vec<f64>, Vec<crate::reaction::BasicReaction<u32>>)>
-{
-    let data: Vec<(f64, crate::reaction::BasicReaction<u32>)> = py_read(REACTIONS_FILE)?;
-    Ok((
-        data.iter().map(|(dt, _r)| *dt).collect(),
-        data.into_iter().map(|(_dt, r)| r).collect(),
-    ))
+#[pyo3(name = "chain")]
+pub fn py_chain(directory: &str) -> PyResult<Box<dyn MarkovChain>> {
+    py_read(directory, CHAIN_FILE)
 }
 
 #[pyfunction]
-pub fn initial_conditions<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyArray2<u32>>> {
-    let data: Array2<u32> = py_read(INITIAL_CONDITIONS_FILE)?;
+#[pyo3(name = "boundary")]
+pub fn py_boundary(directory: &str) -> PyResult<Box<dyn BoundaryCondition>> {
+    py_read(directory, BOUNDARY_FILE)
+}
+
+#[pyfunction]
+#[pyo3(name = "ending_criteria")]
+pub fn py_ending_criteria(directory: &str) -> PyResult<Vec<Box<dyn EndingCriterion>>> {
+    py_read(directory, ENDING_CRITERIA_FILE)
+}
+
+#[pyfunction]
+#[pyo3(name = "initial_conditions")]
+pub fn py_initial_conditions<'py>(
+    py: Python<'py>,
+    directory: &str,
+) -> PyResult<Bound<'py, PyArray2<u32>>> {
+    let data: Array2<u32> = py_read(directory, INITIAL_CONDITIONS_FILE)?;
     Ok(data.to_pyarray(py))
+}
+
+#[pyfunction]
+#[pyo3(name = "reactions")]
+pub fn py_reactions(directory: &str) -> PyResult<Vec<crate::reaction::BasicReaction<u32>>> {
+    py_read(directory, REACTIONS_FILE)
+}
+
+#[pyfunction]
+#[pyo3(name = "delta_times")]
+pub fn py_delta_times<'py>(
+    py: Python<'py>,
+    directory: &str,
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    let data: Vec<f64> = py_read(directory, DELTA_TIMES_FILE)?;
+    Ok(PyArray1::from_vec(py, data))
+}
+
+#[pyfunction]
+#[pyo3(name = "final_state")]
+pub fn py_final_state<'py>(
+    py: Python<'py>,
+    directory: &str,
+) -> PyResult<Bound<'py, PyArray2<u32>>> {
+    let data: Array2<u32> = py_read(directory, FINAL_STATE_FILE)?;
+    Ok(data.to_pyarray(py))
+}
+
+#[pyfunction]
+#[pyo3(name = "final_time")]
+pub fn py_final_time(directory: &str) -> PyResult<f64> {
+    py_read(directory, FINAL_TIME_FILE)
 }

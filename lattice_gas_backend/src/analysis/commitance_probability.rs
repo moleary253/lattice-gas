@@ -159,7 +159,7 @@ mod tests {
         let times = vec![1.0; reactions.len()];
         let sizes = largest_droplet_size_over_time(
             &initial_state.view(),
-            &(Box::new(boundary) as Box<dyn BoundaryCondition<u32>>),
+            &(Box::new(boundary) as Box<dyn BoundaryCondition>),
             &reactions,
             counts_as_droplet,
         );

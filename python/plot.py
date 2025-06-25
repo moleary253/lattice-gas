@@ -45,7 +45,7 @@ def time_slider(axes, times, apply_reaction, reverse_reaction, update, current_i
     return time_slider
 
 
-def interactive_image(initial_conditions, reactions):
+def interactive_image(initial_conditions, reactions, dts):
     """An interactive image plot of a simulation.
 
     :param initial_conditions: The initial conditions of the simulation.
@@ -56,7 +56,7 @@ def interactive_image(initial_conditions, reactions):
     current_conditions = initial_conditions.copy()
     axes_image = ax.imshow(current_conditions, **IMAGE_FORMAT)
 
-    times = np.cumsum(np.array([reaction["dt"] for reaction in reactions]))
+    times = np.cumsum(dts)
 
     time_ax = fig.add_axes([0.25, 0.05, 0.5, 0.03])
     def apply_reaction(reaction):
@@ -76,7 +76,7 @@ def interactive_image(initial_conditions, reactions):
     plt.show()
 
 
-def fractions(initial_conditions, reactions):
+def fractions(initial_conditions, reactions, dts):
     """A plot of the fractions of each species as a function of time.
 
     :param initial_conditions: The initial conditions of the simulation.
@@ -87,7 +87,7 @@ def fractions(initial_conditions, reactions):
     counts = load.counts(initial_conditions, reactions)
     fractions = counts / initial_conditions.size
 
-    durations, times = load.durations_and_times(reactions)
+    times = np.cumsum(dts)
 
     ax.step(times, fractions[load.EMPTY], **E_LINE_FORMAT)
     ax.step(times, fractions[load.INERT], **I_LINE_FORMAT)
@@ -98,11 +98,12 @@ def fractions(initial_conditions, reactions):
     plt.show()
 
 
-def fraction_time_correlation(initial_conditions, reactions, species="Bonding", num_samples=1000, num_integration_points=5000, equilibration_time=None):
+def fraction_time_correlation(initial_conditions, reactions, dts, species="Bonding", num_samples=1000, num_integration_points=5000, equilibration_time=None):
     """Plots the time correlation of the fraction of a species as a function of time delta.
 
     :param initial_conditions: The initial conditions of the simulation.
     :param reactions: The reactions that occurred during the simulation.
+    :param dts: The time between each reaction.
     :param species: The species to be plotted. Default Bonding.
     :param equilibration_time: The time after which the system should be assumed to be at
     equilibrium. Defaults to half of the simulation time.
@@ -114,7 +115,7 @@ def fraction_time_correlation(initial_conditions, reactions, species="Bonding", 
     counts = load.counts(initial_conditions, reactions)
     fractions = counts / initial_conditions.size
 
-    durations, times = load.durations_and_times(reactions)
+    times = np.cumsum(dts)
 
     if equilibration_time is None:
         equilibration_index = times.size // 2
@@ -126,9 +127,9 @@ def fraction_time_correlation(initial_conditions, reactions, species="Bonding", 
 
     fractions = fractions[species, equilibration_index:]
     times = times[equilibration_index:]
-    durations = durations[equilibration_index:]
+    dts = dts[equilibration_index:]
 
-    mean = np.average(fractions, weights=durations)
+    mean = np.average(fractions, weights=dts)
     fractions = fractions - mean
     stdev = np.sqrt(np.average((fractions) ** 2, weights=durations))
     fractions = fractions / stdev
@@ -188,14 +189,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("Loading...")
-    directory = load.unpack_natural_input(args.filename)
-    initial_conditions = load.initial_conditions(directory)
-    reactions = load.reactions(directory)
-    final_conditions = load.final_state(directory)
+    initial_conditions = lg.load.initial_conditions(args.filename)
+    reactions = lg.load.reactions(args.filename)
+    dts = lg.load.delta_times(args.filename)
+    final_conditions = lg.load.final_state(args.filename)
 
     if args.interactive_image:
         print("Graphing Interactive Image...")
-        interactive_image(initial_conditions, reactions)
+        interactive_image(initial_conditions, reactions, dts)
 
     if args.fractions:
         print("Graphing Fractions...")
@@ -203,7 +204,7 @@ if __name__ == "__main__":
 
     if args.time_correlation is not None:
         print("Graphing Time Correlations...")
-        fraction_time_correlation(initial_conditions, reactions, species=args.time_correlation)
+        fraction_time_correlation(initial_conditions, reactions, dts, species=args.time_correlation)
 
     if args.sizes:
         print("Graphing Sizes...")
@@ -215,6 +216,3 @@ if __name__ == "__main__":
         ))
         times = np.cumsum([0] + [reaction["dt"] for reaction in reactions])
         graph_sizes(times, sizes)
-        
-    import shutil
-    shutil.rmtree(load.TEMP_ARCHIVE_PATH)

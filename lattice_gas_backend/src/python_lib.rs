@@ -41,8 +41,14 @@ fn lattice_gas(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     let load = PyModule::new(m.py(), "load")?;
     use crate::serialize::*;
-    load.add_function(wrap_pyfunction!(delta_times_and_reactions, &load)?)?;
-    load.add_function(wrap_pyfunction!(initial_conditions, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_chain, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_boundary, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_ending_criteria, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_initial_conditions, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_reactions, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_delta_times, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_final_state, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_final_time, &load)?)?;
     m.add_submodule(&load)?;
 
     Ok(())

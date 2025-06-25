@@ -7,22 +7,21 @@ use numpy::ndarray::Array2;
 use rand::prelude::*;
 
 use crate::serialize;
-use flate2::{write::GzEncoder, Compression};
-use std::fs;
 
 use numpy::prelude::*;
 use numpy::PyArray2;
 use pyo3::prelude::*;
 
 // Struct to hold simulation state
-struct SimulationState<T: Clone, R: Reaction<T> + Clone> {
-    pub state: Array2<T>,
-    pub boundary: Box<dyn BoundaryCondition<T>>,
-    pub chain: Box<dyn MarkovChain<T, R>>,
-    pub ending_criteria: Vec<Box<dyn EndingCriterion<T, R> + Send>>,
+struct SimulationState {
+    pub state: Array2<u32>,
+    pub boundary: Box<dyn BoundaryCondition>,
+    pub chain: Box<dyn MarkovChain>,
+    pub ending_criteria: Vec<Box<dyn EndingCriterion>>,
     pub rates: BinarySumTree<f64>,
     pub reactions_depending_on_locations: Array2<Vec<usize>>,
-    pub reactions: Vec<(f64, R)>,
+    pub reactions: Vec<BasicReaction<u32>>,
+    pub delta_times: Vec<f64>,
 }
 
 #[pyfunction]
@@ -35,15 +34,12 @@ struct SimulationState<T: Clone, R: Reaction<T> + Clone> {
 ///   - boundary: The boundary conditions of the simulation. Should be a rust
 ///     object which implements BoundaryCondition<u32>.
 ///   - chain: The Markov chain that governs transition rates. Should be a rust
-///     object which implements MarkovChain<u32>.
+///     object which implements MarkovChain.
 ///   - ending_criteria: Determine when the simulation should end. Should be a
 ///     python list of rust objects which implement EndingCriteron.
 ///   - seed: The random seed to initialize the rng.
 ///   - output_file: Where to save the simulation results. Should be a string
 ///     which points to the location of a .tar.gz file.
-///   - save_reactions: Whether or not to save the reactions that occur during
-///     the simulation. Setting this to `true` will roughly double simulation
-///     time based on testing.
 pub fn py_simulate(
     py: Python<'_>,
     initial_state: &Bound<'_, PyArray2<u32>>,
@@ -51,24 +47,12 @@ pub fn py_simulate(
     chain: &Bound<'_, PyAny>,
     ending_criteria: Vec<Bound<'_, PyAny>>,
     seed: u64,
-    output_file: &str,
-    save_reactions: bool,
+    output_dir: &str,
 ) -> PyResult<()> {
     let mut sim_state = py_initialize_simulation(initial_state, boundary, chain, ending_criteria)?;
     let mut rng = StdRng::seed_from_u64(seed);
 
-    let outfile = fs::File::create(output_file)?;
-    let zipper = GzEncoder::new(outfile, Compression::default());
-    let mut archive_builder = tar::Builder::new(zipper);
-    if let Err(_) = serialize::serialize_object(
-        "initial_conditions.json".to_string(),
-        &sim_state.state,
-        &mut archive_builder,
-    ) {
-        return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-            "IO error when writing final state to file system.",
-        ));
-    }
+    let initial_conditions = sim_state.state.clone();
 
     loop {
         let should_end = simulate_iteration(&mut sim_state, &mut rng);
@@ -78,68 +62,31 @@ pub fn py_simulate(
         py.check_signals()?;
     }
 
-    if let Err(_) = serialize::serialize_object(
-        "final_state.json".to_string(),
+    if let Err(err) = serialize::save_simulation(
+        output_dir,
+        &sim_state.chain,
+        &sim_state.boundary,
+        &sim_state.ending_criteria,
+        &initial_conditions,
+        &sim_state.reactions,
+        &sim_state.delta_times,
         &sim_state.state,
-        &mut archive_builder,
     ) {
         return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-            "IO error when writing final state to file system.",
+            err.to_string(),
         ));
-    }
-    if let Err(_) = serialize::serialize_object(
-        "final_time.json".to_string(),
-        &sim_state.reactions.iter().map(|(dt, _)| dt).sum::<f64>(),
-        &mut archive_builder,
-    ) {
-        return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-            "IO error when writing final state to file system.",
-        ));
-    }
-    if save_reactions {
-        if let Err(_) = serialize::serialize_object(
-            "reactions.json".to_string(),
-            &sim_state.reactions,
-            &mut archive_builder,
-        ) {
-            return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                "IO error when writing final state to file system.",
-            ));
-        }
     }
 
     Ok(())
 }
 
-fn py_initialize_simulation(
-    state: &Bound<'_, PyArray2<u32>>,
-    boundary: &Bound<'_, PyAny>,
-    chain: &Bound<'_, PyAny>,
-    ending_criteria: Vec<Bound<'_, PyAny>>,
-) -> PyResult<SimulationState<u32, BasicReaction<u32>>> {
-    let state = state.to_owned_array();
-    let boundary = crate::boundary_condition::extract(boundary)?;
-    let chain = crate::markov_chain::extract(chain)?;
-
-    let mut rust_ending_criteria = Vec::with_capacity(ending_criteria.len());
-    for ending_criterion in ending_criteria.iter() {
-        rust_ending_criteria.push(crate::ending_criterion::extract(ending_criterion)?);
-    }
-    Ok(initialize_simulation(
-        state,
-        boundary,
-        chain,
-        rust_ending_criteria,
-    ))
-}
-
-pub fn simulate<T: Clone, R: Reaction<T> + Clone>(
-    state: Array2<T>,
-    boundary: Box<dyn BoundaryCondition<T>>,
-    chain: Box<dyn MarkovChain<T, R>>,
-    ending_criteria: Vec<Box<dyn EndingCriterion<T, R> + Send>>,
+pub fn simulate(
+    state: Array2<u32>,
+    boundary: Box<dyn BoundaryCondition>,
+    chain: Box<dyn MarkovChain>,
+    ending_criteria: Vec<Box<dyn EndingCriterion>>,
     mut rng: impl Rng,
-) -> (Array2<T>, Vec<(f64, R)>) {
+) -> (Array2<u32>, Vec<f64>, Vec<BasicReaction<u32>>) {
     let mut sim_state = initialize_simulation(state, boundary, chain, ending_criteria);
 
     loop {
@@ -149,15 +96,37 @@ pub fn simulate<T: Clone, R: Reaction<T> + Clone>(
         }
     }
 
-    (sim_state.state, sim_state.reactions)
+    (sim_state.state, sim_state.delta_times, sim_state.reactions)
 }
 
-fn initialize_simulation<T: Clone, R: Reaction<T> + Clone>(
-    state: Array2<T>,
-    boundary: Box<dyn BoundaryCondition<T>>,
-    mut chain: Box<dyn MarkovChain<T, R>>,
-    mut ending_criteria: Vec<Box<dyn EndingCriterion<T, R> + Send>>,
-) -> SimulationState<T, R> {
+fn py_initialize_simulation(
+    state: &Bound<'_, PyArray2<u32>>,
+    boundary: &Bound<'_, PyAny>,
+    chain: &Bound<'_, PyAny>,
+    ending_criteria: Vec<Bound<'_, PyAny>>,
+) -> PyResult<SimulationState> {
+    let state = state.to_owned_array();
+    let boundary = boundary.extract()?;
+    let chain = chain.extract()?;
+
+    let mut rust_ending_criteria = Vec::with_capacity(ending_criteria.len());
+    for ending_criterion in ending_criteria.iter() {
+        rust_ending_criteria.push(ending_criterion.extract()?);
+    }
+    Ok(initialize_simulation(
+        state,
+        boundary,
+        chain,
+        rust_ending_criteria,
+    ))
+}
+
+fn initialize_simulation(
+    state: Array2<u32>,
+    boundary: Box<dyn BoundaryCondition>,
+    mut chain: Box<dyn MarkovChain>,
+    mut ending_criteria: Vec<Box<dyn EndingCriterion>>,
+) -> SimulationState {
     chain.initialize(&state.view(), &boundary);
     for ending_criterion in ending_criteria.iter_mut() {
         ending_criterion.initialize(&state.view(), &chain, &boundary);
@@ -176,6 +145,7 @@ fn initialize_simulation<T: Clone, R: Reaction<T> + Clone>(
         }
     }
     let reactions = Vec::new();
+    let delta_times = Vec::new();
 
     SimulationState {
         state,
@@ -185,13 +155,11 @@ fn initialize_simulation<T: Clone, R: Reaction<T> + Clone>(
         rates,
         reactions_depending_on_locations,
         reactions,
+        delta_times,
     }
 }
 
-fn simulate_iteration<T: Clone, R: Reaction<T> + Clone>(
-    sim_state: &mut SimulationState<T, R>,
-    rng: &mut impl Rng,
-) -> bool {
+fn simulate_iteration(sim_state: &mut SimulationState, rng: &mut impl Rng) -> bool {
     let dt = -(rng.random::<f64>()).ln() / sim_state.rates.sum();
     let chosen_partial_sum = rng.random::<f64>() * sim_state.rates.sum();
     let reaction_id = sim_state.rates.search(chosen_partial_sum);
@@ -200,7 +168,8 @@ fn simulate_iteration<T: Clone, R: Reaction<T> + Clone>(
             .chain
             .reaction(&sim_state.state.view(), &sim_state.boundary, reaction_id);
 
-    sim_state.reactions.push((dt, reaction.clone()));
+    sim_state.reactions.push(reaction);
+    sim_state.delta_times.push(dt);
     reaction.apply(&mut sim_state.state);
 
     sim_state.chain.on_reaction(
@@ -226,16 +195,23 @@ fn simulate_iteration<T: Clone, R: Reaction<T> + Clone>(
         }
     }
 
-    for location in reaction.indicies_updated() {
-        for &reaction_id in sim_state.reactions_depending_on_locations[location].iter() {
-            sim_state.rates.update(
-                reaction_id,
-                sim_state
-                    .chain
-                    .rate(&sim_state.state.view(), &sim_state.boundary, reaction_id),
-            );
-        }
+    let ids_updated: Vec<usize> = reaction
+        .indicies_updated()
+        .iter()
+        .map(|location| sim_state.reactions_depending_on_locations[*location].iter())
+        .fold(Vec::new(), |mut acc, iter| {
+            acc.extend(iter);
+            acc
+        });
+    let mut new_rates = Vec::with_capacity(ids_updated.len());
+    for &reaction_id in ids_updated.iter() {
+        new_rates.push(sim_state.chain.rate(
+            &sim_state.state.view(),
+            &sim_state.boundary,
+            reaction_id,
+        ));
     }
+    sim_state.rates.batch_update(&ids_updated, &new_rates);
 
     false // Continue simulation
 }
@@ -244,13 +220,13 @@ fn simulate_iteration<T: Clone, R: Reaction<T> + Clone>(
 pub mod tests {
     use super::*;
 
-    fn old_simulate<T: Clone, R: Reaction<T> + Clone>(
-        mut state: Array2<T>,
-        boundary: Box<dyn BoundaryCondition<T>>,
-        mut chain: Box<dyn MarkovChain<T, R>>,
-        mut ending_criteria: Vec<Box<dyn EndingCriterion<T, R> + Send>>,
+    fn old_simulate(
+        mut state: Array2<u32>,
+        boundary: Box<dyn BoundaryCondition>,
+        mut chain: Box<dyn MarkovChain>,
+        mut ending_criteria: Vec<Box<dyn EndingCriterion>>,
         mut rng: impl Rng,
-    ) -> (Array2<T>, Vec<(f64, R)>) {
+    ) -> (Array2<u32>, Vec<(f64, BasicReaction<u32>)>) {
         chain.initialize(&state.view(), &boundary);
         for ending_criterion in ending_criteria.iter_mut() {
             ending_criterion.initialize(&state.view(), &chain, &boundary);
@@ -334,7 +310,7 @@ pub mod tests {
         println!("Random seed: {}", seed);
         let rng = StdRng::seed_from_u64(seed);
 
-        let (final_state1, reactions1) = simulate(
+        let (final_state1, delta_times1, reactions1) = simulate(
             state.clone(),
             Box::new(boundary),
             Box::new(chain.clone()),
@@ -349,6 +325,16 @@ pub mod tests {
             rng,
         );
         assert_eq!(final_state1, final_state2);
-        assert_eq!(reactions1, reactions2);
+        assert_eq!(
+            reactions1,
+            reactions2
+                .iter()
+                .map(|(_dt, r)| *r)
+                .collect::<Vec<BasicReaction<u32>>>()
+        );
+        assert_eq!(
+            delta_times1,
+            reactions2.iter().map(|(dt, _r)| *dt).collect::<Vec<f64>>()
+        );
     }
 }

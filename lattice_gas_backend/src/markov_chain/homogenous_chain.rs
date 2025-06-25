@@ -46,7 +46,7 @@ impl HomogenousChain {
     pub fn site_energy(
         &self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         position: [usize; 2],
     ) -> f64 {
         let mut energy = 0.;
@@ -74,18 +74,14 @@ impl HomogenousChain {
     }
 }
 
-impl MarkovChain<u32, BasicReaction<u32>> for HomogenousChain {
-    fn initialize(
-        &mut self,
-        _state: &ArrayView2<u32>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
-    ) {
-    }
+#[typetag::serde]
+impl MarkovChain for HomogenousChain {
+    fn initialize(&mut self, _state: &ArrayView2<u32>, _boundary: &Box<dyn BoundaryCondition>) {}
 
     fn on_reaction(
         &mut self,
         _state: &ArrayView2<u32>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _boundary: &Box<dyn BoundaryCondition>,
         _reaction_id: usize,
         _dt: f64,
     ) {
@@ -98,7 +94,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for HomogenousChain {
     fn reaction(
         &self,
         state: &ArrayView2<u32>,
-        _boundary: &Box<dyn BoundaryCondition<u32>>,
+        _boundary: &Box<dyn BoundaryCondition>,
         reaction_id: usize,
     ) -> BasicReaction<u32> {
         let possible_states = [EMPTY, INERT, BONDING];
@@ -127,7 +123,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for HomogenousChain {
     fn rate(
         &self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         reaction_id: usize,
     ) -> f64 {
         use BasicReaction as BR;
@@ -182,7 +178,7 @@ impl MarkovChain<u32, BasicReaction<u32>> for HomogenousChain {
     fn indicies_affecting_reaction(
         &mut self,
         state: &ArrayView2<u32>,
-        boundary: &Box<dyn BoundaryCondition<u32>>,
+        boundary: &Box<dyn BoundaryCondition>,
         reaction_id: usize,
     ) -> Vec<[usize; 2]> {
         let reaction = self.reaction(state, boundary, reaction_id);
