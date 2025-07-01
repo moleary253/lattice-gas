@@ -3,6 +3,7 @@ use super::*;
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 #[pyclass]
 pub struct ReactionCount {
+    #[pyo3(get)]
     pub threshold: usize,
     count: usize,
 }
@@ -17,6 +18,7 @@ impl ReactionCount {
         }
     }
 
+    #[getter]
     pub fn count(&self) -> usize {
         self.count
     }

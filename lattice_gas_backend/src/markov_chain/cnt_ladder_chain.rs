@@ -14,12 +14,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[pyclass]
 pub struct CNTLadderChain {
+    #[pyo3(get)]
     pub beta: f64,
+    #[pyo3(get)]
     pub top_driving_force: f64,
+    #[pyo3(get)]
     pub top_surface_tension: f64,
+    #[pyo3(get)]
     pub bot_driving_force: f64,
+    #[pyo3(get)]
     pub bot_surface_tension: f64,
+    #[pyo3(get)]
     pub rescue_rate: f64,
+    #[pyo3(get)]
     pub off_rate: f64,
 }
 

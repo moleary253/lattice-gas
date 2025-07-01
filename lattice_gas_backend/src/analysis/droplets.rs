@@ -1,11 +1,4 @@
-use crate::boundary_condition::BoundaryCondition;
-use crate::reaction::Reaction;
-use ndarray::Array2;
-use numpy::ndarray::ArrayView2;
-use numpy::prelude::*;
-use numpy::PyArray2;
-use pyo3::prelude::*;
-use serde::{Deserialize, Serialize};
+use super::*;
 
 /// Used to record a list of changes coarse-grained at the droplet level
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -42,6 +35,7 @@ pub enum DropletReaction {
 pub struct Droplets {
     pub droplets: Vec<Vec<[usize; 2]>>,
     pub labeled: Array2<usize>,
+    pub counts_as_droplet: Vec<u32>,
 }
 
 #[pymethods]
@@ -64,14 +58,12 @@ impl Droplets {
         &mut self,
         state: &Bound<'_, PyArray2<u32>>,
         boundary: &Bound<'_, PyAny>,
-        counts_as_droplet: Vec<u32>,
         reaction: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         self.update(
             &state.as_array(),
             &boundary.extract()?,
-            &counts_as_droplet,
-            &crate::reaction::extract(reaction)?,
+            &*crate::reaction::extract(reaction)?,
         );
         Ok(())
     }
@@ -92,12 +84,24 @@ impl Droplets {
         boundary: &Box<dyn BoundaryCondition>,
         counts_as_droplet: &Vec<u32>,
     ) -> Self {
-        let mut droplets = Vec::new();
-        let mut labeled = Array2::default(state.raw_dim());
+        let droplets = Vec::new();
+        let labeled = Array2::default(state.raw_dim());
+        let mut droplets = Droplets {
+            droplets,
+            labeled,
+            counts_as_droplet: counts_as_droplet.clone(),
+        };
+        droplets.init(state, boundary);
+        droplets
+    }
+
+    fn init(&mut self, state: &ArrayView2<u32>, boundary: &Box<dyn BoundaryCondition>) {
+        self.droplets.clear();
+        self.labeled = Array2::default(state.raw_dim());
 
         for ((x, y), site) in state.indexed_iter() {
             let pos = [x, y];
-            if !counts_as_droplet.contains(&site) || labeled[pos] != 0 {
+            if !self.counts_as_droplet.contains(&site) || self.labeled[pos] != 0 {
                 continue;
             }
             let mut droplet = Vec::new();
@@ -105,21 +109,19 @@ impl Droplets {
             let mut next = Vec::new();
             while to_check.len() > 0 {
                 for idx in to_check {
-                    if !counts_as_droplet.contains(&state[idx]) || labeled[idx] != 0 {
+                    if !self.counts_as_droplet.contains(&state[idx]) || self.labeled[idx] != 0 {
                         continue;
                     }
                     droplet.push(idx);
-                    labeled[idx] = droplets.len() + 1;
+                    self.labeled[idx] = self.droplets.len() + 1;
                     for adjacent in boundary.adjacent_indicies(state, idx) {
                         next.push(adjacent);
                     }
                 }
                 (to_check, next) = (next, Vec::new());
             }
-            droplets.push(droplet);
+            self.droplets.push(droplet);
         }
-
-        Droplets { droplets, labeled }
     }
 
     /// Updates droplet data after a reaction occurs
@@ -127,14 +129,13 @@ impl Droplets {
         &mut self,
         state: &ArrayView2<u32>,
         boundary: &Box<dyn BoundaryCondition>,
-        counts_as_droplet: &Vec<u32>,
-        reaction: &Box<dyn Reaction<u32>>,
+        reaction: &dyn Reaction<u32>,
     ) -> Vec<DropletReaction> {
         let mut changes = Vec::new();
         let mut indicies_updated = reaction.indicies_updated();
         indicies_updated.sort_by(|pos1, pos2| self.labeled[*pos2].cmp(&self.labeled[*pos1]));
         for index in indicies_updated {
-            if counts_as_droplet.contains(&state[index]) {
+            if self.counts_as_droplet.contains(&state[index]) {
                 changes.extend(self.update_added(index, &state, boundary));
             } else {
                 changes.extend(self.update_removed(index, &state, boundary));
@@ -325,6 +326,31 @@ impl Droplets {
     }
 }
 
+#[typetag::serde]
+impl Analyzer for Droplets {
+    fn init(
+        &mut self,
+        state: &ArrayView2<u32>,
+        boundary: &Box<dyn BoundaryCondition>,
+        _chain: &Box<dyn MarkovChain>,
+        _previous_analyzers: &Vec<Box<dyn Analyzer>>,
+    ) {
+        self.init(state, boundary);
+    }
+
+    fn update(
+        &mut self,
+        state: &ArrayView2<u32>,
+        boundary: &Box<dyn BoundaryCondition>,
+        _chain: &Box<dyn MarkovChain>,
+        reaction: BasicReaction<u32>,
+        _dt: f64,
+        _analyzers: &Vec<Box<dyn Analyzer>>,
+    ) {
+        self.update(state, boundary, &reaction);
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use crate::boundary_condition;
@@ -411,8 +437,7 @@ pub mod tests {
             droplets.update(
                 &state.view(),
                 &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-                &vec![1],
-                &(Box::new(*reaction) as Box<dyn Reaction<u32>>),
+                reaction,
             );
 
             assert_eq!(droplets.droplets.len(), expected.len());
@@ -470,8 +495,7 @@ pub mod tests {
             droplets.update(
                 &state.view(),
                 &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-                &vec![1],
-                &(Box::new(*reaction) as Box<dyn Reaction<u32>>),
+                reaction,
             );
 
             assert_eq!(droplets.droplets.len(), expected.len());
@@ -601,8 +625,7 @@ pub mod tests {
             let drs = droplets.update(
                 &state.view(),
                 &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-                &vec![1],
-                &(Box::new(*reaction) as Box<dyn Reaction<u32>>),
+                reaction,
             );
 
             assert_eq!(drs, expected);
@@ -656,8 +679,7 @@ pub mod tests {
             let drs = droplets.update(
                 &state.view(),
                 &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-                &vec![1],
-                &(Box::new(*reaction) as Box<dyn Reaction<u32>>),
+                reaction,
             );
 
             assert_eq!(drs, expected);
@@ -688,8 +710,7 @@ pub mod tests {
             let drs = droplets.update(
                 &state.view(),
                 &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-                &vec![1],
-                &(Box::new(*reaction) as Box<dyn Reaction<u32>>),
+                reaction,
             );
 
             assert_eq!(drs, expected);

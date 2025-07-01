@@ -1,105 +1,104 @@
 use super::*;
-use crate::boundary_condition::BoundaryCondition;
-use crate::reaction::Reaction;
-use numpy::ndarray::{Array2, ArrayView2};
 
 /// Finds the largest size droplet at each time in the simulation.
 ///
-/// Arguments:
-///  - initial_state: The initial conditions of the simulation.
-///  - boundary: The boundary conditions of the simulation.
-///  - reactions: The reactions that took place during the simulation.
-///  - is_droplet: A list of the states which should be tracked as particles
-///    that can form a droplet.
+/// Requires Droplets analyzer to also be in the simulation before this.
 ///
-/// Returns sizes, where each entry is the largest size at that sim step.
-#[pyfunction]
-#[pyo3(name = "largest_droplet_size_over_time")]
-pub fn py_largest_droplet_size_over_time(
-    initial_state: &Bound<'_, PyArray2<u32>>,
-    boundary: &Bound<'_, PyAny>,
-    reactions: &Bound<'_, PyList>,
-    counts_as_droplet: Vec<u32>,
-) -> PyResult<Vec<usize>> {
-    let mut state = initial_state.to_owned_array();
-    let boundary = boundary.extract()?;
-    let (mut droplets, mut sizes) = initialize(&state.view(), &boundary, &counts_as_droplet);
-    for reaction in reactions {
-        let reaction = crate::reaction::extract(&reaction)?;
-        advance_one_step(
-            &mut state,
-            &boundary,
-            &mut droplets,
-            &mut sizes,
-            &counts_as_droplet,
-            &reaction,
-        );
-    }
-    Ok(sizes)
+/// Attributes:
+///  - sizes: A Vec of the sizes reached during the simulation
+///  - delta_times: A Vec of the times between each size change
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[pyclass]
+pub struct LargestDropletSizeAnalyzer {
+    pub sizes: Vec<usize>,
+    pub delta_times: Vec<f64>,
 }
 
-/// Finds the largest size droplet at each time in the simulation.
-///
-/// Arguments:
-///  - state: The initial conditions of the simulation.
-///  - boundary: The boundary conditions of the simulation.
-///  - reactions: The reactions that took place during the simulation.
-///  - is_droplet: A Vec of the states which should be tracked as particles
-///    that can form a droplet.
-///
-/// Returns sizes, where each entry is the largest size at that sim step.
-pub fn largest_droplet_size_over_time(
-    initial_state: &ArrayView2<u32>,
-    boundary: &Box<dyn BoundaryCondition>,
-    reactions: &Vec<Box<dyn Reaction<u32>>>,
-    counts_as_droplet: Vec<u32>,
-) -> Vec<usize> {
-    let mut state = initial_state.to_owned();
-    let (mut droplets, mut sizes) = initialize(&state.view(), &boundary, &counts_as_droplet);
-    for reaction in reactions {
-        advance_one_step(
-            &mut state,
-            &boundary,
-            &mut droplets,
-            &mut sizes,
-            &counts_as_droplet,
-            &reaction,
-        );
+#[pymethods]
+impl LargestDropletSizeAnalyzer {
+    #[new]
+    pub fn new() -> Self {
+        LargestDropletSizeAnalyzer {
+            sizes: Vec::new(),
+            delta_times: Vec::new(),
+        }
     }
-    sizes
+
+    #[getter]
+    pub fn sizes<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<usize>> {
+        PyArray1::from_vec(py, self.sizes.clone())
+    }
+
+    #[getter]
+    pub fn delta_times<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(py, self.delta_times.clone())
+    }
 }
 
-fn initialize(
-    state: &ArrayView2<u32>,
-    boundary: &Box<dyn BoundaryCondition>,
-    counts_as_droplet: &Vec<u32>,
-) -> (Droplets, Vec<usize>) {
-    let mut sizes = Vec::new();
-    let droplets = Droplets::new(&state.view(), &boundary, &counts_as_droplet);
-    sizes.push(
-        droplets
+impl LargestDropletSizeAnalyzer {
+    fn droplets<'a>(other_analyzers: &'a Vec<Box<dyn Analyzer>>) -> &'a Droplets {
+        for analyzer in other_analyzers.iter() {
+            let analyzer_any = &**analyzer as &dyn Any;
+            let Some(droplets) = analyzer_any.downcast_ref::<Droplets>() else {
+                continue;
+            };
+            return droplets;
+        }
+        panic!("`Droplets` was not included as an additional analyzer!");
+    }
+
+    pub fn init<'a>(&mut self, other_analyzers: &'a Vec<Box<dyn Analyzer>>) {
+        self.sizes.clear();
+        self.delta_times.clear();
+        self.delta_times.push(0.);
+        let droplets = LargestDropletSizeAnalyzer::droplets(other_analyzers);
+        self.sizes.push(
+            droplets
+                .droplets
+                .iter()
+                .fold(0, |max, droplet| max.max(droplet.len())),
+        );
+    }
+
+    pub fn update<'a>(&mut self, dt: f64, other_analyzers: &'a Vec<Box<dyn Analyzer>>) {
+        let droplets = LargestDropletSizeAnalyzer::droplets(other_analyzers);
+
+        *self.delta_times.last_mut().unwrap() += dt;
+
+        let size = droplets
             .droplets
             .iter()
-            .fold(0, |max, droplet| max.max(droplet.len())),
-    );
-    (droplets, sizes)
+            .fold(0, |max, droplet| max.max(droplet.len()));
+        if size != *self.sizes.last().unwrap() {
+            self.sizes.push(size);
+            self.delta_times.push(0.);
+        }
+    }
 }
 
-fn advance_one_step(
-    state: &mut Array2<u32>,
-    boundary: &Box<dyn BoundaryCondition>,
-    droplets: &mut Droplets,
-    sizes: &mut Vec<usize>,
-    counts_as_droplet: &Vec<u32>,
-    reaction: &Box<dyn Reaction<u32>>,
-) {
-    reaction.apply(state);
-    droplets.update(&state.view(), &boundary, &counts_as_droplet, reaction);
-    let size = droplets
-        .droplets
-        .iter()
-        .fold(0, |max, droplet| max.max(droplet.len()));
-    sizes.push(size);
+#[typetag::serde]
+impl Analyzer for LargestDropletSizeAnalyzer {
+    fn init(
+        &mut self,
+        _state: &ArrayView2<u32>,
+        _boundary: &Box<dyn BoundaryCondition>,
+        _chain: &Box<dyn MarkovChain>,
+        previous_analyzers: &Vec<Box<dyn Analyzer>>,
+    ) {
+        self.init(previous_analyzers);
+    }
+
+    fn update(
+        &mut self,
+        _state: &ArrayView2<u32>,
+        _boundary: &Box<dyn BoundaryCondition>,
+        _chain: &Box<dyn MarkovChain>,
+        _reaction: BasicReaction<u32>,
+        dt: f64,
+        previous_analyzers: &Vec<Box<dyn Analyzer>>,
+    ) {
+        self.update(dt, previous_analyzers);
+    }
 }
 
 #[cfg(test)]
@@ -112,7 +111,7 @@ mod tests {
     #[test]
     fn largest_droplet_size_over_time_works() {
         use crate::reaction::BasicReaction as BR;
-        let initial_state = arr2(&[
+        let mut state = arr2(&[
             [1, 0, 0, 1, 1],
             [1, 1, 0, 0, 0],
             [0, 1, 0, 1, 1],
@@ -121,6 +120,7 @@ mod tests {
             [0, 0, 1, 0, 0],
         ]);
         let boundary = boundary_condition::Periodic;
+        let boundary = Box::new(boundary) as Box<dyn BoundaryCondition>;
         let reactions = vec![
             BR::point_change(0_u32, 1, [5, 1]),
             BR::point_change(1, 0, [5, 2]),
@@ -131,17 +131,27 @@ mod tests {
             BR::point_change(0, 1, [0, 1]),
             BR::point_change(1, 0, [1, 1]),
         ];
-        let sizes = largest_droplet_size_over_time(
-            &initial_state.view(),
-            &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-            &reactions
-                .iter()
-                .map(|reaction| Box::new(*reaction) as Box<dyn Reaction<u32>>)
-                .collect(),
-            vec![1],
-        );
+        let droplets = Droplets::new(&state.view(), &boundary, &vec![1]);
+        let mut analyzers = vec![Box::new(droplets) as Box<dyn Analyzer>];
+        let mut largest_size = LargestDropletSizeAnalyzer::new();
 
-        let expected_sizes = vec![6, 6, 6, 6, 7, 13, 10, 11, 10];
-        assert_eq!(expected_sizes, sizes);
+        largest_size.init(&analyzers);
+
+        for reaction in reactions {
+            reaction.apply(&mut state);
+            let Some(droplets_mut) =
+                (&mut *analyzers[0] as &mut dyn Any).downcast_mut::<Droplets>()
+            else {
+                panic!("Cast didn't work");
+            };
+            droplets_mut.update(&state.view(), &boundary, &reaction);
+
+            largest_size.update(1.0, &analyzers);
+        }
+
+        let expected_sizes = vec![6, 7, 13, 10, 11, 10];
+        let expected_dts = vec![4.0, 1.0, 1.0, 1.0, 1.0, 0.0];
+        assert_eq!(expected_sizes, largest_size.sizes);
+        assert_eq!(expected_dts, largest_size.delta_times);
     }
 }

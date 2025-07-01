@@ -20,6 +20,7 @@ impl ComparisonMode {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[pyclass]
 pub struct ParticleCount {
+    #[pyo3(get)]
     pub threshold: usize,
     count: usize,
     counts_as_particle: Vec<u32>,
@@ -42,6 +43,7 @@ impl ParticleCount {
         }
     }
 
+    #[getter]
     pub fn count(&self) -> usize {
         self.count
     }

@@ -114,39 +114,12 @@ fn advance_one_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boundary_condition::BoundaryCondition;
-    use crate::reaction::BasicReaction as BR;
-    use crate::reaction::Reaction;
-    use ndarray::{arr1, arr2};
+    use ndarray::arr1;
 
     #[test]
     fn basic_functionality() {
-        let initial_state = arr2(&[[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]);
-        let boundary = crate::boundary_condition::Periodic;
-        let counts_as_droplet = vec![1];
-
-        let reactions: Vec<BR<u32>> = vec![
-            BR::point_change(0, 1, [1, 1]),
-            BR::point_change(0, 1, [1, 2]),
-            BR::point_change(0, 1, [3, 3]),
-            BR::point_change(1, 0, [1, 1]),
-            BR::point_change(1, 0, [3, 3]),
-            BR::point_change(0, 1, [1, 1]),
-            BR::point_change(1, 0, [1, 2]),
-            BR::point_change(1, 0, [1, 1]),
-        ];
-        let reactions: Vec<Box<dyn Reaction<u32>>> = reactions
-            .iter()
-            .map(|reaction| Box::new(*reaction) as Box<dyn Reaction<u32>>)
-            .collect();
-
-        let times = vec![1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0];
-        let sizes = largest_droplet_size_over_time(
-            &initial_state.view(),
-            &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-            &reactions,
-            counts_as_droplet.clone(),
-        );
+        let times = vec![1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 0.0];
+        let sizes = vec![0, 1, 2, 2, 1, 1, 2, 1, 0];
 
         let (time_seen, num_fwd, num_bkwd) = cnt_rates(&sizes, &times);
 

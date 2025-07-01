@@ -1,3 +1,4 @@
+use crate::analysis::Analyzer;
 use crate::binary_sum_tree::BinarySumTree;
 use crate::boundary_condition::BoundaryCondition;
 use crate::ending_criterion::EndingCriterion;
@@ -17,6 +18,7 @@ struct SimulationState {
     pub state: Array2<u32>,
     pub boundary: Box<dyn BoundaryCondition>,
     pub chain: Box<dyn MarkovChain>,
+    pub analyzers: Vec<Box<dyn Analyzer>>,
     pub ending_criteria: Vec<Box<dyn EndingCriterion>>,
     pub rates: BinarySumTree<f64>,
     pub reactions_depending_on_locations: Array2<Vec<usize>>,
@@ -35,6 +37,8 @@ struct SimulationState {
 ///     object which implements BoundaryCondition<u32>.
 ///   - chain: The Markov chain that governs transition rates. Should be a rust
 ///     object which implements MarkovChain.
+///   - analyzers: A list of `Analyzer` objects to run analysis during the
+///     simulation.
 ///   - ending_criteria: Determine when the simulation should end. Should be a
 ///     python list of rust objects which implement EndingCriteron.
 ///   - seed: The random seed to initialize the rng.
@@ -45,11 +49,13 @@ pub fn py_simulate(
     initial_state: &Bound<'_, PyArray2<u32>>,
     boundary: &Bound<'_, PyAny>,
     chain: &Bound<'_, PyAny>,
+    analyzers: Vec<Box<dyn Analyzer>>,
     ending_criteria: Vec<Bound<'_, PyAny>>,
     seed: u64,
     output_dir: &str,
 ) -> PyResult<()> {
-    let mut sim_state = py_initialize_simulation(initial_state, boundary, chain, ending_criteria)?;
+    let mut sim_state =
+        py_initialize_simulation(initial_state, boundary, chain, analyzers, ending_criteria)?;
     let mut rng = StdRng::seed_from_u64(seed);
 
     let initial_conditions = sim_state.state.clone();
@@ -68,7 +74,7 @@ pub fn py_simulate(
         &sim_state.boundary,
         &sim_state.ending_criteria,
         &initial_conditions,
-        &sim_state.reactions,
+        &sim_state.analyzers,
         &sim_state.delta_times,
         &sim_state.state,
     ) {
@@ -84,10 +90,16 @@ pub fn simulate(
     state: Array2<u32>,
     boundary: Box<dyn BoundaryCondition>,
     chain: Box<dyn MarkovChain>,
+    analyzers: Vec<Box<dyn Analyzer>>,
     ending_criteria: Vec<Box<dyn EndingCriterion>>,
     mut rng: impl Rng,
-) -> (Array2<u32>, Vec<f64>, Vec<BasicReaction<u32>>) {
-    let mut sim_state = initialize_simulation(state, boundary, chain, ending_criteria);
+) -> (
+    Array2<u32>,
+    Vec<f64>,
+    Vec<BasicReaction<u32>>,
+    Vec<Box<dyn Analyzer>>,
+) {
+    let mut sim_state = initialize_simulation(state, boundary, chain, analyzers, ending_criteria);
 
     loop {
         let should_end = simulate_iteration(&mut sim_state, &mut rng);
@@ -96,13 +108,19 @@ pub fn simulate(
         }
     }
 
-    (sim_state.state, sim_state.delta_times, sim_state.reactions)
+    (
+        sim_state.state,
+        sim_state.delta_times,
+        sim_state.reactions,
+        sim_state.analyzers,
+    )
 }
 
 fn py_initialize_simulation(
     state: &Bound<'_, PyArray2<u32>>,
     boundary: &Bound<'_, PyAny>,
     chain: &Bound<'_, PyAny>,
+    analyzers: Vec<Box<dyn Analyzer>>,
     ending_criteria: Vec<Bound<'_, PyAny>>,
 ) -> PyResult<SimulationState> {
     let state = state.to_owned_array();
@@ -117,6 +135,7 @@ fn py_initialize_simulation(
         state,
         boundary,
         chain,
+        analyzers,
         rust_ending_criteria,
     ))
 }
@@ -125,9 +144,17 @@ fn initialize_simulation(
     state: Array2<u32>,
     boundary: Box<dyn BoundaryCondition>,
     mut chain: Box<dyn MarkovChain>,
+    analyzers: Vec<Box<dyn Analyzer>>,
     mut ending_criteria: Vec<Box<dyn EndingCriterion>>,
 ) -> SimulationState {
     chain.initialize(&state.view(), &boundary);
+    let old_analyzers = analyzers;
+    let mut analyzers = Vec::new();
+    for mut analyzer in old_analyzers {
+        analyzer.init(&state.view(), &boundary, &chain, &analyzers);
+        analyzers.push(analyzer);
+    }
+
     for ending_criterion in ending_criteria.iter_mut() {
         ending_criterion.initialize(&state.view(), &chain, &boundary);
     }
@@ -151,6 +178,7 @@ fn initialize_simulation(
         state,
         boundary,
         chain,
+        analyzers,
         ending_criteria,
         rates,
         reactions_depending_on_locations,
@@ -178,6 +206,19 @@ fn simulate_iteration(sim_state: &mut SimulationState, rng: &mut impl Rng) -> bo
         reaction_id,
         dt,
     );
+
+    let old_analyzers = std::mem::replace(&mut sim_state.analyzers, Vec::new());
+    for mut analyzer in old_analyzers {
+        analyzer.update(
+            &sim_state.state.view(),
+            &sim_state.boundary,
+            &sim_state.chain,
+            reaction,
+            dt,
+            &sim_state.analyzers,
+        );
+        sim_state.analyzers.push(analyzer);
+    }
 
     for ending_criterion in sim_state.ending_criteria.iter_mut() {
         ending_criterion.update(
@@ -310,10 +351,11 @@ pub mod tests {
         println!("Random seed: {}", seed);
         let rng = StdRng::seed_from_u64(seed);
 
-        let (final_state1, delta_times1, reactions1) = simulate(
+        let (final_state1, delta_times1, reactions1, _analyzers) = simulate(
             state.clone(),
             Box::new(boundary),
             Box::new(chain.clone()),
+            vec![],
             vec![Box::new(ending_criterion)],
             rng.clone(),
         );

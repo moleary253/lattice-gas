@@ -4,13 +4,10 @@ use pyo3::prelude::*;
 fn lattice_gas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let analysis = PyModule::new(m.py(), "analysis")?;
     use crate::analysis::*;
-    analysis.add_function(wrap_pyfunction!(
-        py_largest_droplet_size_over_time,
-        &analysis
-    )?)?;
     analysis.add_function(wrap_pyfunction!(py_commitance, &analysis)?)?;
     analysis.add_function(wrap_pyfunction!(py_cnt_rates, &analysis)?)?;
     analysis.add_class::<Droplets>()?;
+    analysis.add_class::<LargestDropletSizeAnalyzer>()?;
     m.add_submodule(&analysis)?;
 
     let boundary_condition = PyModule::new(m.py(), "boundary_condition")?;
@@ -45,7 +42,7 @@ fn lattice_gas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     load.add_function(wrap_pyfunction!(py_boundary, &load)?)?;
     load.add_function(wrap_pyfunction!(py_ending_criteria, &load)?)?;
     load.add_function(wrap_pyfunction!(py_initial_conditions, &load)?)?;
-    load.add_function(wrap_pyfunction!(py_reactions, &load)?)?;
+    load.add_function(wrap_pyfunction!(py_analyzers, &load)?)?;
     load.add_function(wrap_pyfunction!(py_delta_times, &load)?)?;
     load.add_function(wrap_pyfunction!(py_final_state, &load)?)?;
     load.add_function(wrap_pyfunction!(py_final_time, &load)?)?;

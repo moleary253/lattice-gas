@@ -6,8 +6,8 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::{
-    boundary_condition::BoundaryCondition, ending_criterion::EndingCriterion,
-    markov_chain::MarkovChain, reaction::BasicReaction,
+    analysis::Analyzer, boundary_condition::BoundaryCondition, ending_criterion::EndingCriterion,
+    markov_chain::MarkovChain,
 };
 
 use numpy::prelude::*;
@@ -19,7 +19,7 @@ pub const CHAIN_FILE: &str = "chain.msgpack";
 pub const BOUNDARY_FILE: &str = "boundary.msgpack";
 pub const ENDING_CRITERIA_FILE: &str = "ending_criteria.msgpack";
 pub const INITIAL_CONDITIONS_FILE: &str = "initial_conditions.msgpack";
-pub const REACTIONS_FILE: &str = "reactions.msgpack";
+pub const ANALYZER_FILE: &str = "analyzers.msgpack";
 pub const DELTA_TIMES_FILE: &str = "delta_times.msgpack";
 pub const FINAL_STATE_FILE: &str = "final_state.msgpack";
 pub const FINAL_TIME_FILE: &str = "final_time.msgpack";
@@ -30,7 +30,7 @@ pub fn save_simulation(
     boundary: &Box<dyn BoundaryCondition>,
     ending_criteria: &Vec<Box<dyn EndingCriterion>>,
     initial_conditions: &Array2<u32>,
-    reactions: &Vec<BasicReaction<u32>>,
+    analyzers: &Vec<Box<dyn Analyzer>>,
     delta_times: &Vec<f64>,
     final_state: &Array2<u32>,
 ) -> Result<(), Box<dyn std::error::Error + 'static>> {
@@ -40,7 +40,7 @@ pub fn save_simulation(
     serialize_object(directory.join(BOUNDARY_FILE), boundary)?;
     serialize_object(directory.join(ENDING_CRITERIA_FILE), ending_criteria)?;
     serialize_object(directory.join(INITIAL_CONDITIONS_FILE), initial_conditions)?;
-    serialize_object(directory.join(REACTIONS_FILE), reactions)?;
+    serialize_object(directory.join(ANALYZER_FILE), analyzers)?;
     serialize_object(directory.join(DELTA_TIMES_FILE), delta_times)?;
     serialize_object(directory.join(FINAL_STATE_FILE), final_state)?;
     serialize_object(
@@ -106,9 +106,9 @@ pub fn py_initial_conditions<'py>(
 }
 
 #[pyfunction]
-#[pyo3(name = "reactions")]
-pub fn py_reactions(directory: &str) -> PyResult<Vec<crate::reaction::BasicReaction<u32>>> {
-    py_read(directory, REACTIONS_FILE)
+#[pyo3(name = "analyzers")]
+pub fn py_analyzers(directory: &str) -> PyResult<Vec<Box<dyn Analyzer>>> {
+    py_read(directory, ANALYZER_FILE)
 }
 
 #[pyfunction]

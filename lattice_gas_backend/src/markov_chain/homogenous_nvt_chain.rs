@@ -6,10 +6,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[pyclass]
 pub struct HomogenousNVTChain {
+    #[pyo3(get)]
     pub beta: f64,
+    #[pyo3(get)]
     pub bond_energy: f64,
+    #[pyo3(get)]
     pub inert_to_bonding_rate: f64,
+    #[pyo3(get)]
     pub bonding_to_inert_rate: f64,
+    #[pyo3(get)]
     pub diffusion_constant: f64,
     sum_num_adjacent: Option<Vec<usize>>,
 }

@@ -94,81 +94,30 @@ fn advance_one_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boundary_condition::BoundaryCondition;
-    use crate::reaction::BasicReaction as BR;
-    use crate::reaction::Reaction;
-    use ndarray::{arr1, arr2};
+    use ndarray::arr1;
 
     #[test]
     fn basic_functionality() {
-        let initial_state = arr2(&[
-            [0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0],
-        ]);
-        let boundary = crate::boundary_condition::Periodic;
-        let counts_as_droplet = vec![1];
         let bottom_absorbing_size = 0;
         let top_absorbing_size = 10;
 
-        let reactions = vec![
-            // Droplet size stays same as other reaction happens
-            BR::point_change(0_u32, 1, [1, 1]),
-            BR::point_change(0, 1, [6, 6]),
-            BR::point_change(0, 1, [1, 2]),
-            BR::point_change(0, 1, [2, 2]),
-            BR::point_change(0, 1, [2, 1]),
-            BR::point_change(1, 0, [6, 6]),
-            BR::point_change(1, 0, [1, 2]),
-            BR::point_change(1, 0, [2, 2]),
-            BR::point_change(1, 0, [2, 1]),
-            BR::point_change(1, 0, [1, 1]),
-            // Droplet breaks
-            BR::point_change(0, 1, [2, 1]),
-            BR::point_change(0, 1, [2, 2]),
-            BR::point_change(0, 1, [2, 3]),
-            BR::point_change(0, 1, [2, 4]),
-            BR::point_change(0, 1, [2, 5]),
-            BR::point_change(1, 0, [2, 3]),
-            BR::point_change(1, 0, [2, 1]),
-            BR::point_change(1, 0, [2, 2]),
-            BR::point_change(1, 0, [2, 4]),
-            BR::point_change(1, 0, [2, 5]),
-            // Droplet hits top_absorbing_size
-            BR::point_change(0, 1, [2, 1]),
-            BR::point_change(0, 1, [2, 2]),
-            BR::point_change(0, 1, [3, 1]),
-            BR::point_change(0, 1, [3, 2]),
-            BR::point_change(0, 1, [4, 1]),
-            BR::point_change(0, 1, [4, 2]),
-            BR::point_change(0, 1, [5, 1]),
-            BR::point_change(0, 1, [5, 2]),
-            BR::point_change(0, 1, [6, 1]),
-            BR::point_change(0, 1, [6, 2]),
+        let sizes = vec![
+            1, 1, 2, 3, 4, 4, 3, 2, 1, 0, // Droplet stays same size
+            1, 2, 3, 4, 5, 2, 2, 2, 1, 0, // Droplet breaks/skips size
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, // Droplet hits top absorbing size
         ];
-        let reactions: Vec<Box<dyn Reaction<u32>>> = reactions
-            .iter()
-            .map(|reaction| Box::new(*reaction) as Box<dyn Reaction<u32>>)
-            .collect();
 
-        let times = vec![1.0; reactions.len()];
-        let sizes = largest_droplet_size_over_time(
-            &initial_state.view(),
-            &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-            &reactions,
-            counts_as_droplet,
+        let delta_times = Vec::from_iter((1..sizes.len()).map(|x| x as f64));
+
+        let (succeeded, seen) = commitance(
+            &sizes,
+            &delta_times,
+            bottom_absorbing_size,
+            top_absorbing_size,
         );
 
-        let (succeeded, seen) =
-            commitance(&sizes, &times, bottom_absorbing_size, top_absorbing_size);
-
-        let expected_seen = arr1(&[6.0, 7.0, 4.0, 4.0, 2.0, 1.0, 1.0, 1.0, 1.0]);
-        let expected_succeeded = arr1(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        let expected_seen = arr1(&[63.0, 96.0, 47.0, 49.0, 40.0, 26.0, 27.0, 28.0, 29.0]);
+        let expected_succeeded = arr1(&[21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0]);
 
         assert_eq!(expected_succeeded, succeeded);
         assert_eq!(expected_seen, seen);

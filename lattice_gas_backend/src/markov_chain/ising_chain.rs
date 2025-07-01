@@ -7,8 +7,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[pyclass]
 pub struct IsingChain {
+    #[pyo3(get)]
     pub beta: f64,
+    #[pyo3(get)]
     pub bond_energy: f64,
+    #[pyo3(get)]
     pub magnetic_field: f64,
 }
 
@@ -21,6 +24,10 @@ impl IsingChain {
             bond_energy,
             magnetic_field,
         }
+    }
+
+    pub fn bond_energy(&self) -> f64 {
+        self.bond_energy
     }
 }
 
@@ -103,18 +110,14 @@ impl MarkovChain for IsingChain {
             BR::PointChange {
                 from: EMPTY,
                 to: BONDING,
-                position,
-            } => (self.beta
-                * (-self.site_energy(state, boundary, position) + 4.0 * self.bond_energy)
-                + self.magnetic_field * self.beta)
-                .exp(),
+                position: _,
+            } => 1.0,
             BR::PointChange {
                 from: BONDING,
                 to: EMPTY,
                 position,
-            } => (self.beta
-                * (self.site_energy(state, boundary, position) + 4.0 * self.bond_energy)
-                - self.magnetic_field * self.beta)
+            } => (self.beta * (2. * self.site_energy(state, boundary, position))
+                - 2. * self.magnetic_field * self.beta)
                 .exp(),
             _ => panic!("Unexpected reaction {:?}", reaction),
         }

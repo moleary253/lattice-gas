@@ -4,6 +4,7 @@ use crate::analysis::Droplets;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[pyclass]
 pub struct LargestDropletSize {
+    #[pyo3(get)]
     pub threshold: usize,
     pub droplets: Option<Droplets>,
     pub counts_as_droplet: Vec<u32>,
@@ -58,6 +59,6 @@ impl EndingCriterion for LargestDropletSize {
         self.droplets
             .as_mut()
             .expect("Should be initialized")
-            .update(&state.view(), boundary, &self.counts_as_droplet, &reaction);
+            .update(&state.view(), boundary, &*reaction);
     }
 }

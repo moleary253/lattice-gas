@@ -11,12 +11,18 @@ pub const BONDING: u32 = 2;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[pyclass]
 pub struct HomogenousChain {
+    #[pyo3(get)]
     pub beta: f64,
+    #[pyo3(get)]
     pub bond_energy: f64,
+    #[pyo3(get)]
     pub driving_chemical_potential: f64,
 
+    #[pyo3(get)]
     pub inert_fugacity: f64,
+    #[pyo3(get)]
     pub bonding_fugacity: f64,
+    #[pyo3(get)]
     pub inert_to_bonding_rate: f64,
 }
 

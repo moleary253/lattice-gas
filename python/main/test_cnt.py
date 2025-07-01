@@ -21,11 +21,21 @@ def run_simulation(output_file, random_seed, magnetic_field, bond_energy, initia
         magnetic_field=magnetic_field,
     )
 
+    analyzers = [
+        lg.analysis.Droplets(
+            initial_state,
+            boundary,
+            [load.BONDING],
+        ),
+        lg.analysis.LargestDropletSizeAnalyzer(),
+    ]
+
 
     lg.simulate.simulate(
         initial_state,
         boundary,
         chain,
+        analyzers,
         ending_criteria,
         random_seed,
         output_file,
@@ -37,7 +47,7 @@ def run():
 
     num_trials = 100
     bond_energy = -1.5
-    magnetic_fields = [1.20, 1.25, 1.5, 1.75]
+    magnetic_fields = [1.10, 1.15, 1.20, 1.25]
     
     if os.path.exists(DEFAULT_DIR):
         shutil.rmtree(DEFAULT_DIR)
@@ -49,7 +59,7 @@ def run():
             initial_state = np.zeros((100, 100), dtype=np.dtype("u4"))
 
             ending_criterion = lg.ending_criterion.LargestDropletSize(
-                100,
+                3000,
                 [load.BONDING],
             )
             failsafe_ending_criterion = lg.ending_criterion.ReactionCount(
@@ -68,12 +78,14 @@ def run():
 def forward_rate(size, bond_energy, field=0):
     return np.exp(
         field + 5 * bond_energy
-    ) * (2 * np.sqrt(np.pi * size) - 2 * np.sqrt(np.pi))
+    ) * (2 * np.sqrt(np.pi) * (np.sqrt(size) - 1))
 
 
 def analyze(path):
     from scipy.stats import gaussian_kde
 
+    random_sim = os.listdir(path)[0]
+    random_sim = os.path.join(path, random_sim)
     boundary = lg.boundary_condition.Periodic()
 
     bond_energy = -1.5
@@ -81,13 +93,16 @@ def analyze(path):
     times = {}
     magnetic_fields = {}
     bot_absorb_size = 1
-    top_absorb_size = 100
+    try:
+        ending_criteria = lg.load.ending_criteria(random_sim)
+        top_absorb_size = ending_criteria[0].threshold
+    except:
+        top_absorb_size = 100
     time_seen = {}
     time_succeeded = {}
     time_seen_rates = {}
     num_fwd = {}
     num_bkwd = {}
-    monomer_concentrations = {}
     for sim_name in tqdm(os.listdir(path)):
         sim_path = os.path.join(path, sim_name)
 
@@ -98,53 +113,17 @@ def analyze(path):
             magnetic_fields[group] = magnetic_field
             time_seen[group] = np.zeros(top_absorb_size - bot_absorb_size - 1)
             time_succeeded[group] = np.zeros(time_seen[group].shape)
-            monomer_concentrations[group] = np.array([0., 0.])
             time_seen_rates[group] = np.zeros(top_absorb_size + 1)
             num_fwd[group] = np.zeros(top_absorb_size)
             num_bkwd[group] = np.zeros(top_absorb_size)
             
-        initial_state = lg.load.initial_conditions(sim_path)
         final_time = lg.load.final_time(sim_path)
-        state = initial_state.copy().astype("u4")
-        reactions = lg.load.reactions(sim_path)
-        dts = lg.load.delta_times(sim_path)
-        droplets = lg.analysis.Droplets(
-            state,
-            boundary,
-            [load.BONDING],
-        )
-        t = 0
-        weighted_sum = 0
-        for i, reaction in enumerate(reactions):
-            if t < final_time / 2:
-                t += dts[i]
-                weighted_sum += dts[i] * len(list(
-                    filter(
-                        lambda droplet: len(droplet) == 1,
-                        droplets.droplets()
-                    )
-                ))
-            else:
-                break
-            load.apply_reaction(state, reaction)
-            droplets.update(
-                state,
-                boundary,
-                [load.BONDING],
-                reaction,
-            )
-        monomer_concentrations[group] += np.array([weighted_sum, t])
 
-        state = initial_state.copy().astype("u4")
-        sizes = lg.analysis.largest_droplet_size_over_time(
-            state,
-            boundary,
-            reactions,
-            [load.BONDING],
-        )
+        analyzers = lg.load.analyzers(sim_path)
+        largest_size = analyzers[1]
         t_succeeded, t_seen = lg.analysis.commitance(
-            sizes,
-            dts,
+            largest_size.sizes,
+            largest_size.delta_times,
             bot_absorb_size,
             top_absorb_size,
         )
@@ -152,8 +131,8 @@ def analyze(path):
         time_succeeded[group] += t_succeeded
 
         t_seen_rates, n_fwd, n_bkwd = lg.analysis.cnt_rates(
-            sizes,
-            dts,
+            largest_size.sizes,
+            largest_size.delta_times,
         )
         time_seen_rates[group] += t_seen_rates[:time_seen_rates[group].size]
         num_fwd[group] += n_fwd[:num_fwd[group].size]
@@ -161,14 +140,6 @@ def analyze(path):
 
         times[group].append(final_time)
 
-    for group in monomer_concentrations:
-        monomer_concentrations[group] = (
-            monomer_concentrations[group][0]
-            / monomer_concentrations[group][1]
-            / 100 / 100
-        )
-    print(monomer_concentrations)
-        
     fig1, ax1s = plt.subplots(len(times), 1)
 
     upper_time_limit = 2

@@ -1,9 +1,9 @@
 use boundary_condition::BoundaryCondition;
-use lattice_gas::reaction::Reaction;
 use lattice_gas::simulate::simulate;
 use lattice_gas::*;
 use ndarray::Array2;
 use rand::prelude::*;
+use std::any::Any;
 
 #[test]
 fn droplet_analysis_consistent_over_time() {
@@ -28,42 +28,34 @@ fn droplet_analysis_consistent_over_time() {
     );
 
     let state: Array2<u32> = Array2::default((width, height));
-    let ending_criterion = ending_criterion::ReactionCount::new(threshold);
     let boundary = boundary_condition::Periodic;
+
+    let is_droplet = vec![markov_chain::BONDING];
+    let droplets = analysis::Droplets::new(
+        &state.view(),
+        &(Box::new(boundary) as Box<dyn BoundaryCondition>),
+        &is_droplet,
+    );
+
+    let ending_criterion = ending_criterion::ReactionCount::new(threshold);
 
     let seed = rand::rng().random::<u64>();
     println!("Random seed: {}", seed);
     let rng = StdRng::seed_from_u64(seed);
 
-    let (final_state, _delta_times, reactions) = simulate(
-        state.clone(),
+    let (final_state, _delta_times, _reactions, mut analyzers) = simulate(
+        state,
         Box::new(boundary),
         Box::new(chain),
+        vec![Box::new(droplets)],
         vec![Box::new(ending_criterion)],
         rng,
     );
 
-    let is_droplet = vec![markov_chain::BONDING];
-
-    let mut state = state;
-    let mut droplets = analysis::Droplets::new(
-        &state.view(),
-        &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-        &is_droplet,
-    );
-    for reaction in reactions {
-        reaction.apply(&mut state);
-        droplets.update(
-            &state.view(),
-            &(Box::new(boundary) as Box<dyn BoundaryCondition>),
-            &is_droplet,
-            &(Box::new(reaction) as Box<dyn Reaction<u32>>),
-        );
-    }
-
-    for (site1, site2) in state.iter().zip(final_state.iter()) {
-        assert_eq!(site1, site2);
-    }
+    let droplets = analyzers.remove(0);
+    let Ok(droplets) = (droplets as Box<dyn Any>).downcast::<analysis::Droplets>() else {
+        panic!("Cast didn't work");
+    };
 
     let expected_droplets = analysis::Droplets::new(
         &final_state.view(),
