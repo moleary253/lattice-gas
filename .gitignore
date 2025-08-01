@@ -1,3 +1,10 @@
 /target
 /data
 /python/__pycache__
+/python/main/__pycache__
+/python/main/data
+
+
+.DS_Store
+*.pyc
+*.pyo

@@ -13,6 +13,10 @@ use numpy::prelude::*;
 use numpy::PyArray2;
 use pyo3::prelude::*;
 
+// (MLO) Adding functionality to save npy files
+
+use ndarray_npy::write_npy;
+
 // Struct to hold simulation state
 struct SimulationState {
     pub state: Array2<u32>,
@@ -82,6 +86,12 @@ pub fn py_simulate(
             err.to_string(),
         ));
     }
+
+    // (MLO) Adding functionality to save npy files
+    // There is probably a better way to do this, within the save_simulation function, I have to look into it.
+
+    let final_state_path = format!("{}/final_state.npy", output_dir);
+    write_npy(&final_state_path, &sim_state.state).map_err(|err| PyErr::new::<pyo3::exceptions::PyIOError, _>(err.to_string()))?;
 
     Ok(())
 }
