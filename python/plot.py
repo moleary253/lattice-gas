@@ -190,8 +190,6 @@ if __name__ == "__main__":
 
     print("Loading...")
     initial_conditions = lg.load.initial_conditions(args.filename)
-    reactions = lg.load.reactions(args.filename)
-    dts = lg.load.delta_times(args.filename)
     final_conditions = lg.load.final_state(args.filename)
 
     if args.interactive_image:
@@ -208,11 +206,6 @@ if __name__ == "__main__":
 
     if args.sizes:
         print("Graphing Sizes...")
-        sizes = np.array(lg.analysis.largest_droplet_size_over_time(
-            initial_conditions.astype("u4"),
-            lg.boundary_condition.Periodic(),
-            reactions,
-            [load.BONDING],
-        ))
-        times = np.cumsum([0] + [reaction["dt"] for reaction in reactions])
-        graph_sizes(times, sizes)
+        sizes = lg.load.analyzers(args.filename)[1]
+        times = np.cumsum(sizes.delta_times)
+        graph_sizes(times, sizes.sizes)

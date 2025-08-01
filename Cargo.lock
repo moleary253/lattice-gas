@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "lattice_gas"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "flate2",
  "ndarray",

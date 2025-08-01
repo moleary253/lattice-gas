@@ -5,22 +5,26 @@ use super::*;
 /// Requires Droplets analyzer to also be in the simulation before this.
 ///
 /// Attributes:
-///  - sizes: A Vec of the sizes reached during the simulation
-///  - delta_times: A Vec of the times between each size change
+///  - sizes: A Vec of the sizes reached during the simulation.
+///  - delta_times: A Vec of the times between each size change.
+///  - bottom_threshold: Sizes smaller than this will be treated as 0.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[pyclass]
 pub struct LargestDropletSizeAnalyzer {
     pub sizes: Vec<usize>,
     pub delta_times: Vec<f64>,
+    #[pyo3(get)]
+    pub bottom_threshold: usize,
 }
 
 #[pymethods]
 impl LargestDropletSizeAnalyzer {
     #[new]
-    pub fn new() -> Self {
+    pub fn new(bottom_threshold: usize) -> Self {
         LargestDropletSizeAnalyzer {
             sizes: Vec::new(),
             delta_times: Vec::new(),
+            bottom_threshold,
         }
     }
 
@@ -52,12 +56,14 @@ impl LargestDropletSizeAnalyzer {
         self.delta_times.clear();
         self.delta_times.push(0.);
         let droplets = LargestDropletSizeAnalyzer::droplets(other_analyzers);
-        self.sizes.push(
-            droplets
-                .droplets
-                .iter()
-                .fold(0, |max, droplet| max.max(droplet.len())),
-        );
+        let mut size = droplets
+            .droplets
+            .iter()
+            .fold(0, |max, droplet| max.max(droplet.len()));
+        if size < self.bottom_threshold {
+            size = 0;
+        }
+        self.sizes.push(size);
     }
 
     pub fn update<'a>(&mut self, dt: f64, other_analyzers: &'a Vec<Box<dyn Analyzer>>) {
@@ -65,10 +71,13 @@ impl LargestDropletSizeAnalyzer {
 
         *self.delta_times.last_mut().unwrap() += dt;
 
-        let size = droplets
+        let mut size = droplets
             .droplets
             .iter()
             .fold(0, |max, droplet| max.max(droplet.len()));
+        if size < self.bottom_threshold {
+            size = 0;
+        }
         if size != *self.sizes.last().unwrap() {
             self.sizes.push(size);
             self.delta_times.push(0.);
@@ -133,7 +142,7 @@ mod tests {
         ];
         let droplets = Droplets::new(&state.view(), &boundary, &vec![1]);
         let mut analyzers = vec![Box::new(droplets) as Box<dyn Analyzer>];
-        let mut largest_size = LargestDropletSizeAnalyzer::new();
+        let mut largest_size = LargestDropletSizeAnalyzer::new(0);
 
         largest_size.init(&analyzers);
 
@@ -151,6 +160,53 @@ mod tests {
 
         let expected_sizes = vec![6, 7, 13, 10, 11, 10];
         let expected_dts = vec![4.0, 1.0, 1.0, 1.0, 1.0, 0.0];
+        assert_eq!(expected_sizes, largest_size.sizes);
+        assert_eq!(expected_dts, largest_size.delta_times);
+    }
+
+    #[test]
+    fn bottom_threshold() {
+        use crate::reaction::BasicReaction as BR;
+        let mut state = arr2(&[
+            [1, 0, 0, 1, 1],
+            [1, 1, 0, 0, 0],
+            [0, 1, 0, 1, 1],
+            [0, 0, 0, 0, 1],
+            [0, 0, 0, 1, 1],
+            [0, 0, 1, 0, 0],
+        ]);
+        let boundary = boundary_condition::Periodic;
+        let boundary = Box::new(boundary) as Box<dyn BoundaryCondition>;
+        let reactions = vec![
+            BR::point_change(0_u32, 1, [5, 1]),
+            BR::point_change(1, 0, [5, 2]),
+            BR::point_change(1, 0, [5, 1]),
+            BR::point_change(0, 1, [0, 2]),
+            BR::point_change(0, 1, [2, 0]),
+            BR::point_change(1, 0, [3, 4]),
+            BR::point_change(0, 1, [0, 1]),
+            BR::point_change(1, 0, [1, 1]),
+        ];
+        let droplets = Droplets::new(&state.view(), &boundary, &vec![1]);
+        let mut analyzers = vec![Box::new(droplets) as Box<dyn Analyzer>];
+        let mut largest_size = LargestDropletSizeAnalyzer::new(11);
+
+        largest_size.init(&analyzers);
+
+        for reaction in reactions {
+            reaction.apply(&mut state);
+            let Some(droplets_mut) =
+                (&mut *analyzers[0] as &mut dyn Any).downcast_mut::<Droplets>()
+            else {
+                panic!("Cast didn't work");
+            };
+            droplets_mut.update(&state.view(), &boundary, &reaction);
+
+            largest_size.update(1.0, &analyzers);
+        }
+
+        let expected_sizes = vec![0, 13, 0, 11, 0];
+        let expected_dts = vec![5.0, 1.0, 1.0, 1.0, 0.0];
         assert_eq!(expected_sizes, largest_size.sizes);
         assert_eq!(expected_dts, largest_size.delta_times);
     }

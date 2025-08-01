@@ -27,7 +27,7 @@ def run_simulation(output_file, random_seed, magnetic_field, bond_energy, initia
             boundary,
             [load.BONDING],
         ),
-        lg.analysis.LargestDropletSizeAnalyzer(),
+        lg.analysis.LargestDropletSizeAnalyzer(3),
     ]
 
 
@@ -47,7 +47,7 @@ def run():
 
     num_trials = 100
     bond_energy = -1.5
-    magnetic_fields = [1.10, 1.15, 1.20, 1.25]
+    magnetic_fields = [1]
     
     if os.path.exists(DEFAULT_DIR):
         shutil.rmtree(DEFAULT_DIR)
@@ -56,14 +56,14 @@ def run():
         for magnetic_field in magnetic_fields:
             random_seed = 17 + i * 31 + int(magnetic_field * 1e5) % 11
             output_file = DEFAULT_DIR + f"/{magnetic_field:.5f}_{i+1}"
-            initial_state = np.zeros((100, 100), dtype=np.dtype("u4"))
+            initial_state = np.zeros((20, 20), dtype=np.dtype("u4"))
 
             ending_criterion = lg.ending_criterion.LargestDropletSize(
-                3000,
+                100,
                 [load.BONDING],
             )
             failsafe_ending_criterion = lg.ending_criterion.ReactionCount(
-                1_000_000
+                10_000_000
             )
             run_simulation(
                 output_file,
@@ -76,9 +76,7 @@ def run():
 
 
 def forward_rate(size, bond_energy, field=0):
-    return np.exp(
-        field + 5 * bond_energy
-    ) * (2 * np.sqrt(np.pi) * (np.sqrt(size) - 1))
+    return 4 * np.sqrt(size)
 
 
 def analyze(path):
@@ -93,11 +91,13 @@ def analyze(path):
     times = {}
     magnetic_fields = {}
     bot_absorb_size = 1
-    try:
-        ending_criteria = lg.load.ending_criteria(random_sim)
-        top_absorb_size = ending_criteria[0].threshold
-    except:
-        top_absorb_size = 100
+
+    ending_criteria = lg.load.ending_criteria(random_sim)
+    top_absorb_size = ending_criteria[0].threshold
+
+    initial_conditions = lg.load.initial_conditions(random_sim)
+    area = initial_conditions.size
+
     time_seen = {}
     time_succeeded = {}
     time_seen_rates = {}
@@ -155,7 +155,7 @@ def analyze(path):
             beta=1.0,
             bond_energy=bond_energy,
             magnetic_field=magnetic_fields[group],
-            area=100*100,
+            area=area,
             stopping_size=100,
             match_mean=np.average(times[group]),
         )

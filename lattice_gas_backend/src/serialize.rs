@@ -41,7 +41,6 @@ pub fn save_simulation(
     serialize_object(directory.join(ENDING_CRITERIA_FILE), ending_criteria)?;
     serialize_object(directory.join(INITIAL_CONDITIONS_FILE), initial_conditions)?;
     serialize_object(directory.join(ANALYZER_FILE), analyzers)?;
-    serialize_object(directory.join(DELTA_TIMES_FILE), delta_times)?;
     serialize_object(directory.join(FINAL_STATE_FILE), final_state)?;
     serialize_object(
         directory.join(FINAL_TIME_FILE),

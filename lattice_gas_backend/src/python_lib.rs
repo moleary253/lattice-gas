@@ -34,6 +34,8 @@ fn lattice_gas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let simulate = PyModule::new(m.py(), "simulate")?;
     use crate::simulate::*;
     simulate.add_function(wrap_pyfunction!(py_simulate, &simulate)?)?;
+    use crate::calculate_cgf::*;
+    simulate.add_function(wrap_pyfunction!(calculate_cgf, &simulate)?)?;
     m.add_submodule(&simulate)?;
 
     let load = PyModule::new(m.py(), "load")?;
